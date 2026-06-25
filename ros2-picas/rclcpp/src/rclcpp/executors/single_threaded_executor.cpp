@@ -20,7 +20,8 @@
 using rclcpp::executors::SingleThreadedExecutor;
 
 SingleThreadedExecutor::SingleThreadedExecutor(const rclcpp::ExecutorOptions & options)
-: rclcpp::Executor(options) {
+: rclcpp::Executor(options)
+{
 #ifdef PICAS
   executor_cpu = -1;
   executor_priority = 0;
@@ -55,25 +56,26 @@ SingleThreadedExecutor::spin()
 // for sched_deadline
 #include <pthread.h>
 #define gettid() syscall(__NR_gettid)
-struct sched_attr {
-    int32_t size;
+struct sched_attr
+{
+  int32_t size;
 
-    int32_t sched_policy;
-    int64_t sched_flags;
+  int32_t sched_policy;
+  int64_t sched_flags;
 
-    /* SCHED_NORMAL, SCHED_BATCH */
-    int32_t sched_nice;
+  /* SCHED_NORMAL, SCHED_BATCH */
+  int32_t sched_nice;
 
-    /* SCHED_FIFO, SCHED_RR */
-    int32_t sched_priority;
+  /* SCHED_FIFO, SCHED_RR */
+  int32_t sched_priority;
 
-    /* SCHED_DEADLINE (nsec) */
-    int64_t sched_runtime;
-    int64_t sched_deadline;
-    int64_t sched_period;
+  /* SCHED_DEADLINE (nsec) */
+  int64_t sched_runtime;
+  int64_t sched_deadline;
+  int64_t sched_period;
 };
 
-static long int sched_setattr(pid_t pid, const struct sched_attr *attr, unsigned int flags)
+static long int sched_setattr(pid_t pid, const struct sched_attr * attr, unsigned int flags)
 {
   return syscall(__NR_sched_setattr, pid, attr, flags);
 }
@@ -87,13 +89,15 @@ static long int sched_setattr(pid_t pid, const struct sched_attr *attr, unsigned
 void
 SingleThreadedExecutor::spin_cpu(int cpu)
 {
-  RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Singlethreadedexecutor spin: in Thread ID %ld", gettid());
+  RCLCPP_INFO(
+    rclcpp::get_logger("rclcpp"), "Singlethreadedexecutor spin: in Thread ID %ld",
+    gettid());
   if (cpu >= 0) {
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
     CPU_SET(cpu, &cpuset);
-    if(pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset)) {
-        RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "spin_cpu has an error.");
+    if (pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset)) {
+      RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "spin_cpu has an error.");
     }
   }
 
@@ -115,13 +119,15 @@ SingleThreadedExecutor::spin_cpu(int cpu)
 void
 SingleThreadedExecutor::spin_rt()
 {
-  RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Singlethreadedexecutor spin: in Thread ID %ld", gettid());
+  RCLCPP_INFO(
+    rclcpp::get_logger("rclcpp"), "Singlethreadedexecutor spin: in Thread ID %ld",
+    gettid());
   // Register executor as a real-time thread
   if (this->executor_priority != 0) {
     sched_param sch_params;
     sch_params.sched_priority = this->executor_priority;
-    if(pthread_setschedparam(pthread_self(), SCHED_FIFO, &sch_params)) {
-        RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "spin_rt thread has an error.");
+    if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &sch_params)) {
+      RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "spin_rt thread has an error.");
     }
   }
 
@@ -129,8 +135,8 @@ SingleThreadedExecutor::spin_rt()
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
     CPU_SET(this->executor_cpu, &cpuset);
-    if(pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset)) {
-        RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "spin_rt thread has an error.");
+    if (pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset)) {
+      RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "spin_rt thread has an error.");
     }
   }
 
@@ -140,7 +146,7 @@ SingleThreadedExecutor::spin_rt()
   // has changed from galactic 'RCLCPP_SCOPE_EXIT'
   RCPPUTILS_SCOPE_EXIT(this->spinning.store(false));
   while (rclcpp::ok(this->context_) && spinning.load()) {
-    //RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "[spin_rt] Start spin loop. Initialize any_executable.");    
+    //RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "[spin_rt] Start spin loop. Initialize any_executable.");
     rclcpp::AnyExecutable any_executable;
     if (get_next_executable(any_executable)) {
       execute_any_executable(any_executable);
@@ -154,9 +160,11 @@ SingleThreadedExecutor::spin_rt()
 void
 SingleThreadedExecutor::spin_deadline(int rt_priority, int T, int budget)
 {
-  RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Singlethreadedexecutor spin_deadline: in Thread ID %ld", gettid());
+  RCLCPP_INFO(
+    rclcpp::get_logger(
+      "rclcpp"), "Singlethreadedexecutor spin_deadline: in Thread ID %ld", gettid());
 
-  
+
   // Register executor as a real-time thread
   if (rt_priority != 0) {
 
@@ -169,11 +177,11 @@ SingleThreadedExecutor::spin_deadline(int rt_priority, int T, int budget)
     attr.sched_nice = 0;
     attr.sched_priority = 0;
 
-     /* creates a 10ms/30ms reservation */
+    /* creates a 10ms/30ms reservation */
     attr.sched_policy = SCHED_DEADLINE;
     attr.sched_runtime = budget * 1000 * 1000;
-    attr.sched_period  = T * 1000 * 1000;
-    attr.sched_deadline= T * 1000 * 1000;
+    attr.sched_period = T * 1000 * 1000;
+    attr.sched_deadline = T * 1000 * 1000;
 
     ret = sched_setattr(0, &attr, flags);
     if (ret < 0) {
@@ -181,8 +189,8 @@ SingleThreadedExecutor::spin_deadline(int rt_priority, int T, int budget)
     }
   }
 
-  RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "spin_deadline thread is on CPU %d.", sched_getcpu());      
-  
+  RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "spin_deadline thread is on CPU %d.", sched_getcpu());
+
   if (spinning.exchange(true)) {
     throw std::runtime_error("spin() called while already spinning");
   }
@@ -192,8 +200,8 @@ SingleThreadedExecutor::spin_deadline(int rt_priority, int T, int budget)
     rclcpp::AnyExecutable any_executable;
     if (get_next_executable(any_executable)) {
       execute_any_executable(any_executable);
-      
-    } 
+
+    }
   }
 }
 #endif

@@ -33,10 +33,9 @@ int main(int argc, char ** argv)
     crunch_time = get_crunch_time_in_ms(std::stoull(argv[1]));
     std::cout << std::setfill(' ') << std::setw(12) << argv[1] << "       " <<
       crunch_time << "ms" << std::endl;
-      return 0;
-  }
-  else if (argc == 3){
-    for(uint64_t i = 0; i < std::stoull(argv[2]); i++){
+    return 0;
+  } else if (argc == 3) {
+    for (uint64_t i = 0; i < std::stoull(argv[2]); i++) {
       crunch_time = get_crunch_time_in_ms(std::stoull(argv[1]));
       std::cout << std::setfill(' ') << std::setw(12) << argv[1] << "       " <<
         crunch_time << "ms" << std::endl;

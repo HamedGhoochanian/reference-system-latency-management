@@ -56,7 +56,8 @@ private:
 
     publisher_->publish(std::move(message));
     gettimeofday(&c2, NULL);
-    std::cout << "Sensor "  << this->get_name() << ": " << (c2.tv_sec - c1.tv_sec) * 1000000 + (c2.tv_usec - c1.tv_usec) << std::endl;
+    std::cout << "Sensor " << this->get_name() << ": " <<
+      (c2.tv_sec - c1.tv_sec) * 1000000 + (c2.tv_usec - c1.tv_usec) << std::endl;
   }
 
 private:

@@ -32,12 +32,18 @@ int main(int argc, char * argv[])
   auto nodes = create_autoware_nodes<RclcppSystem, TimeConfig>();
 
   rclcpp::executors::SingleThreadedExecutor executor;
-  
+
   executor.enable_callback_priority();
-  RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "PiCAS priority-based callback scheduling: %s", executor.callback_priority_enabled ? "Enabled" : "Disabled");
+  RCLCPP_INFO(
+    rclcpp::get_logger(
+      "rclcpp"), "PiCAS priority-based callback scheduling: %s",
+    executor.callback_priority_enabled ? "Enabled" : "Disabled");
 
   executor.set_executor_priority_cpu(90, 0);
-  RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "PiCAS executor 1's rt-priority %d and CPU %d", executor.executor_priority, executor.executor_cpu);
+  RCLCPP_INFO(
+    rclcpp::get_logger(
+      "rclcpp"), "PiCAS executor 1's rt-priority %d and CPU %d", executor.executor_priority,
+    executor.executor_cpu);
 
   for (auto & node : nodes) {
     executor.add_node(node);
@@ -49,4 +55,3 @@ int main(int argc, char * argv[])
 
   return 0;
 }
-

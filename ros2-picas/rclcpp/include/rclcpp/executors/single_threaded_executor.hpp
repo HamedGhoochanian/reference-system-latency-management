@@ -69,7 +69,7 @@ public:
   RCLCPP_PUBLIC
   void
   spin_rt();
-  
+
   RCLCPP_PUBLIC
   void
   spin_cpu(int c);

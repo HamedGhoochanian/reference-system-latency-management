@@ -48,7 +48,7 @@ auto create_autoware_nodes()
         #ifdef PICAS
         .callback_priority = CallbackPriority::FRONT_LIDAR_DRIVER_CALLBACK
         #endif
-        }));
+      }));
 
   nodes.emplace_back(
     std::make_shared<typename SystemType::Sensor>(
@@ -58,7 +58,7 @@ auto create_autoware_nodes()
         #ifdef PICAS
         .callback_priority = CallbackPriority::REAR_LIDAR_DRIVER_CALLBACK
         #endif
-        }));
+      }));
 
   nodes.emplace_back(
     std::make_shared<typename SystemType::Sensor>(
@@ -68,7 +68,7 @@ auto create_autoware_nodes()
         #ifdef PICAS
         .callback_priority = CallbackPriority::POINT_CLOUD_MAP_CALLBACK
         #endif
-        }));
+      }));
 
   nodes.emplace_back(
     std::make_shared<typename SystemType::Sensor>(
@@ -78,7 +78,7 @@ auto create_autoware_nodes()
         #ifdef PICAS
         .callback_priority = CallbackPriority::VISUALIZER_CALLBACK
         #endif
-        }));
+      }));
 
   nodes.emplace_back(
     std::make_shared<typename SystemType::Sensor>(
@@ -88,7 +88,7 @@ auto create_autoware_nodes()
         #ifdef PICAS
         .callback_priority = CallbackPriority::LANELET_2_MAP_CALLBACK
         #endif
-        }));
+      }));
 
   nodes.emplace_back(
     std::make_shared<typename SystemType::Sensor>(
@@ -98,7 +98,7 @@ auto create_autoware_nodes()
         #ifdef PICAS
         .callback_priority = CallbackPriority::EUCLIDEAN_CLUSTER_SETTINGS_CALLBACK
         #endif
-        }));
+      }));
 
   // transform nodes
   nodes.emplace_back(
@@ -111,7 +111,7 @@ auto create_autoware_nodes()
     #ifdef PICAS
     .callback_priority = CallbackPriority::POINTS_TRANSFORMER_FRONT_CALLBACK
     #endif
-    }));
+  }));
 
   nodes.emplace_back(
     std::make_shared<typename SystemType::Transform>(
@@ -123,7 +123,7 @@ auto create_autoware_nodes()
     #ifdef PICAS
     .callback_priority = CallbackPriority::POINTS_TRANSFORMER_REAR_CALLBACK
     #endif
-    }));
+  }));
 
   nodes.emplace_back(
     std::make_shared<typename SystemType::Transform>(
@@ -135,7 +135,7 @@ auto create_autoware_nodes()
     #ifdef PICAS
     .callback_priority = CallbackPriority::VOXEL_GRID_DOWNSAMPLER_CALLBACK
     #endif
-    }));
+  }));
 
   nodes.emplace_back(
     std::make_shared<typename SystemType::Transform>(
@@ -147,7 +147,7 @@ auto create_autoware_nodes()
     #ifdef PICAS
     .callback_priority = CallbackPriority::POINT_CLOUD_MAP_LOADER_CALLBACK
     #endif
-    }));
+  }));
 
   nodes.emplace_back(
     std::make_shared<typename SystemType::Transform>(
@@ -159,7 +159,7 @@ auto create_autoware_nodes()
     #ifdef PICAS
     .callback_priority = CallbackPriority::RAY_GROUND_FILTER_CALLBACK
     #endif
-    }));
+  }));
 
   nodes.emplace_back(
     std::make_shared<typename SystemType::Transform>(
@@ -171,7 +171,7 @@ auto create_autoware_nodes()
     #ifdef PICAS
     .callback_priority = CallbackPriority::OBJECT_COLLISION_ESTIMATOR_CALLBACK
     #endif
-    }));
+  }));
 
   nodes.emplace_back(
     std::make_shared<typename SystemType::Transform>(
@@ -183,7 +183,7 @@ auto create_autoware_nodes()
     #ifdef PICAS
     .callback_priority = CallbackPriority::MPC_CONTROLLER_CALLBACK
     #endif
-    }));
+  }));
 
   nodes.emplace_back(
     std::make_shared<typename SystemType::Transform>(
@@ -195,7 +195,7 @@ auto create_autoware_nodes()
     #ifdef PICAS
     .callback_priority = CallbackPriority::PARKING_PLANNER_CALLBACK
     #endif
-    }));
+  }));
 
   nodes.emplace_back(
     std::make_shared<typename SystemType::Transform>(
@@ -207,7 +207,7 @@ auto create_autoware_nodes()
     #ifdef PICAS
     .callback_priority = CallbackPriority::LANE_PLANNER_CALLBACK
     #endif
-    }));
+  }));
 
   // fusion nodes
   nodes.emplace_back(
@@ -222,7 +222,7 @@ auto create_autoware_nodes()
     .callback_priority_1 = CallbackPriority::POINT_CLOUD_FUSION_CALLBACK_1,
     .callback_priority_2 = CallbackPriority::POINT_CLOUD_FUSION_CALLBACK_2
     #endif
-    }));
+  }));
 
   nodes.emplace_back(
     std::make_shared<typename SystemType::Fusion>(
@@ -236,7 +236,7 @@ auto create_autoware_nodes()
     .callback_priority_1 = CallbackPriority::NDT_LOCALIZER_CALLBACK_1,
     .callback_priority_2 = CallbackPriority::NDT_LOCALIZER_CALLBACK_2
     #endif
-    }));
+  }));
 
   nodes.emplace_back(
     std::make_shared<typename SystemType::Fusion>(
@@ -250,7 +250,7 @@ auto create_autoware_nodes()
     .callback_priority_1 = CallbackPriority::VEHICLE_INTERFACE_CALLBACK_1,
     .callback_priority_2 = CallbackPriority::VEHICLE_INTERFACE_CALLBACK_2
     #endif
-    }));
+  }));
 
   nodes.emplace_back(
     std::make_shared<typename SystemType::Fusion>(
@@ -264,7 +264,7 @@ auto create_autoware_nodes()
     .callback_priority_1 = CallbackPriority::LANELET_2_GLOBAL_PLANNER_CALLBACK_1,
     .callback_priority_2 = CallbackPriority::LANELET_2_GLOBAL_PLANNER_CALLBACK_2
     #endif
-    }));
+  }));
 
   nodes.emplace_back(
     std::make_shared<typename SystemType::Fusion>(
@@ -278,7 +278,7 @@ auto create_autoware_nodes()
     .callback_priority_1 = CallbackPriority::LANELET_2_MAP_LOADER_CALLBACK_1,
     .callback_priority_2 = CallbackPriority::LANELET_2_MAP_LOADER_CALLBACK_2
     #endif
-    }));
+  }));
 
   // cyclic node
   nodes.emplace_back(
@@ -300,7 +300,7 @@ auto create_autoware_nodes()
     .callback_priority_6 = CallbackPriority::BEHAVIOR_PLANNER_CALLBACK_6,
     .callback_priority_7 = CallbackPriority::BEHAVIOR_PLANNER_CALLBACK_7
     #endif
-    }));
+  }));
 
   // intersection node
   nodes.emplace_back(
@@ -314,7 +314,7 @@ auto create_autoware_nodes()
         #ifdef PICAS
         .callback_priority = CallbackPriority::EUCLIDEAN_CLUSTER_DETECTOR_CALLBACK
         #endif
-        },
+      },
       {.input_topic = "EuclideanClusterSettings",
         .output_topic = "EuclideanIntersection",
         .number_crunch_limit = TimingConfig::EUCLIDEAN_INTERSECTION,
@@ -333,7 +333,7 @@ auto create_autoware_nodes()
     #ifdef PICAS
     .callback_priority = CallbackPriority::VEHICLE_DBW_SYSTEM_CALLBACK
     #endif
-    }));
+  }));
 
   nodes.emplace_back(
     std::make_shared<typename SystemType::Command>(
@@ -343,7 +343,7 @@ auto create_autoware_nodes()
     #ifdef PICAS
     .callback_priority = CallbackPriority::INTERSECTION_OUTPUT_CALLBACK
     #endif
-    }));
+  }));
 #pragma GCC diagnostic pop
 
   return nodes;

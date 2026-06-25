@@ -516,13 +516,13 @@ Executor::execute_any_executable(AnyExecutable & any_exec)
 {
   if (!spinning.load()) {
   #ifdef PICAS_DEBUG
-    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "execute callback, but there isn't a spinning load.");    
+    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "execute callback, but there isn't a spinning load.");
   #endif
     return;
   }
   if (any_exec.timer) {
   #ifdef PICAS_DEBUG
-    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "execute callback [timer callback].");    
+    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "execute callback [timer callback].");
   #endif
     TRACEPOINT(
       rclcpp_executor_execute,
@@ -531,7 +531,7 @@ Executor::execute_any_executable(AnyExecutable & any_exec)
   }
   if (any_exec.subscription) {
   #ifdef PICAS_DEBUG
-    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "execute callback [subscription callback].");    
+    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "execute callback [subscription callback].");
   #endif
     TRACEPOINT(
       rclcpp_executor_execute,
@@ -540,19 +540,19 @@ Executor::execute_any_executable(AnyExecutable & any_exec)
   }
   if (any_exec.service) {
   #ifdef PICAS_DEBUG
-    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "execute callback [service callback].");    
+    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "execute callback [service callback].");
   #endif
     execute_service(any_exec.service);
   }
   if (any_exec.client) {
   #ifdef PICAS_DEBUG
-    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "execute callback [client callback].");    
+    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "execute callback [client callback].");
   #endif
     execute_client(any_exec.client);
   }
   if (any_exec.waitable) {
   #ifdef PICAS_DEBUG
-    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "execute callback [waitable callback].");    
+    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "execute callback [waitable callback].");
   #endif
     any_exec.waitable->execute(any_exec.data);
   }
@@ -864,7 +864,7 @@ Executor::get_next_ready_executable_from_map(
 #ifdef PICAS
   // PiCAS
   if (callback_priority_enabled) {
-    // Check timers/subscriptions/services/clients/waitables and 
+    // Check timers/subscriptions/services/clients/waitables and
     // keep only the highest-priority one
     int highest_priority = -1;
 
@@ -874,19 +874,19 @@ Executor::get_next_ready_executable_from_map(
     }
 
     memory_strategy_->get_next_subscription(any_executable, weak_groups_to_nodes);
-    if (any_executable.subscription && highest_priority < any_executable.subscription->callback_priority) {
+    if (any_executable.subscription &&
+      highest_priority < any_executable.subscription->callback_priority)
+    {
       highest_priority = any_executable.subscription->callback_priority;
       any_executable.timer = nullptr;
-    }
-    else any_executable.subscription = nullptr;
+    } else {any_executable.subscription = nullptr;}
 
     memory_strategy_->get_next_service(any_executable, weak_groups_to_nodes);
     if (any_executable.service && highest_priority < any_executable.service->callback_priority) {
       highest_priority = any_executable.service->callback_priority;
       any_executable.timer = nullptr;
       any_executable.subscription = nullptr;
-    }
-    else any_executable.service = nullptr;
+    } else {any_executable.service = nullptr;}
 
     memory_strategy_->get_next_client(any_executable, weak_groups_to_nodes);
     if (any_executable.client && highest_priority < any_executable.client->callback_priority) {
@@ -894,8 +894,7 @@ Executor::get_next_ready_executable_from_map(
       any_executable.timer = nullptr;
       any_executable.subscription = nullptr;
       any_executable.service = nullptr;
-    }
-    else any_executable.client = nullptr;
+    } else {any_executable.client = nullptr;}
 
     memory_strategy_->get_next_waitable(any_executable, weak_groups_to_nodes);
     if (any_executable.waitable && highest_priority < any_executable.waitable->callback_priority) {
@@ -905,15 +904,15 @@ Executor::get_next_ready_executable_from_map(
       any_executable.subscription = nullptr;
       any_executable.service = nullptr;
       any_executable.client = nullptr;
-    }
-    else any_executable.waitable = nullptr;
+    } else {any_executable.waitable = nullptr;}
 
-    if (highest_priority >= 0) success = true;
+    if (highest_priority >= 0) {success = true;}
   } else {
 #endif
 
 
-  std::lock_guard<std::mutex> guard{mutex_};
+  std::lock_guard<std::mutex> guard{mutex_
+  };
   // Check the timers to see if there are any that are ready
   memory_strategy_->get_next_timer(any_executable, weak_groups_to_nodes);
   if (any_executable.timer) {
@@ -949,7 +948,7 @@ Executor::get_next_ready_executable_from_map(
     }
   }
 #ifdef PICAS
-  }
+}
 #endif
   // At this point any_executable should be valid with either a valid subscription
   // or a valid timer, or it should be a null shared_ptr
@@ -989,14 +988,16 @@ Executor::get_next_executable(AnyExecutable & any_executable, std::chrono::nanos
 #ifdef PICAS
   if (callback_priority_enabled == false) {
   #ifdef PICAS_DEBUG
-    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "[get_next_executable] Begin. Call get_next_ready_executable().");
-  #endif 
+    RCLCPP_INFO(
+      rclcpp::get_logger(
+        "rclcpp"), "[get_next_executable] Begin. Call get_next_ready_executable().");
+  #endif
 
-  success = get_next_ready_executable(any_executable);
+    success = get_next_ready_executable(any_executable);
 
   #ifdef PICAS_DEBUG
-    if (success) print_list_ready_executable(any_executable);
-  #endif 
+    if (success) {print_list_ready_executable(any_executable);}
+  #endif
   }
 #else
   success = get_next_ready_executable(any_executable);
@@ -1005,7 +1006,7 @@ Executor::get_next_executable(AnyExecutable & any_executable, std::chrono::nanos
   // If there are none
   if (!success) {
     // Wait for subscriptions or timers to work on
-  
+
   #ifdef PICAS_DEBUG
     timeval ctime, ftime;
     double elapsed_time;
@@ -1013,12 +1014,14 @@ Executor::get_next_executable(AnyExecutable & any_executable, std::chrono::nanos
   #endif
 
     wait_for_work(timeout);
-  
+
   #ifdef PICAS_DEBUG
     gettimeofday(&ftime, NULL);
     elapsed_time = (ftime.tv_sec - ctime.tv_sec) * 1.0;
     elapsed_time += (ftime.tv_usec - ctime.tv_usec) / 1000000.0;
-    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "[get_next_executable] Elaspsed time for wait_for_work is %f", elapsed_time);    
+    RCLCPP_INFO(
+      rclcpp::get_logger(
+        "rclcpp"), "[get_next_executable] Elaspsed time for wait_for_work is %f", elapsed_time);
   #endif
 
     if (!spinning.load()) {
@@ -1027,7 +1030,7 @@ Executor::get_next_executable(AnyExecutable & any_executable, std::chrono::nanos
     // Try again
     success = get_next_ready_executable(any_executable);
 #ifdef PICAS_DEBUG
-    if (success) print_list_ready_executable(any_executable);
+    if (success) {print_list_ready_executable(any_executable);}
 #endif
   }
   return success;
@@ -1035,7 +1038,8 @@ Executor::get_next_executable(AnyExecutable & any_executable, std::chrono::nanos
 
 #ifdef PICAS_DEBUG
 void
-Executor::print_list_ready_executable(AnyExecutable & any_executable) {
+Executor::print_list_ready_executable(AnyExecutable & any_executable)
+{
   // Only one callback of a node is on any_executable, so there exists only one list
   // Find a callback
   timeval ctime;
@@ -1043,36 +1047,51 @@ Executor::print_list_ready_executable(AnyExecutable & any_executable) {
   if (any_executable.timer) {
     //auto group = get_group_by_timer(any_executable.timer, weak_nodes_);
     //auto node = get_node_by_group(group, weak_nodes_);
-    //RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Timer callback of node (%s) is on executable queue at %ld", node.get()->get_name(), ctime.tv_sec*1000+ctime.tv_usec/1000);    
-    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "[print_list_ready_executable] A timer callback is on executable queue at %ld", ctime.tv_sec*1000+ctime.tv_usec/1000);    
+    //RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Timer callback of node (%s) is on executable queue at %ld", node.get()->get_name(), ctime.tv_sec*1000+ctime.tv_usec/1000);
+    RCLCPP_INFO(
+      rclcpp::get_logger(
+        "rclcpp"), "[print_list_ready_executable] A timer callback is on executable queue at %ld",
+      ctime.tv_sec * 1000 + ctime.tv_usec / 1000);
     /*
     if (any_executable.timer.get()->is_ready()) {
-      RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Timer callback of node (%s) is ready at %ld", any_executable.node_base.get()->get_name(), ctime.tv_sec*1000+ctime.tv_usec/1000);    
+      RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Timer callback of node (%s) is ready at %ld", any_executable.node_base.get()->get_name(), ctime.tv_sec*1000+ctime.tv_usec/1000);
     } else {
-      RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Timer callback of node (%s) is not ready at %ld", any_executable.node_base.get()->get_name(), ctime.tv_sec*1000+ctime.tv_usec/1000);    
+      RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Timer callback of node (%s) is not ready at %ld", any_executable.node_base.get()->get_name(), ctime.tv_sec*1000+ctime.tv_usec/1000);
     }
-    */   
+    */
   }
 
   if (any_executable.subscription != NULL) {
-    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Subscription callback of node (%s) is on executable queue at %ld", any_executable.node_base.get()->get_name(), ctime.tv_sec*1000+ctime.tv_usec/1000);    
+    RCLCPP_INFO(
+      rclcpp::get_logger(
+        "rclcpp"), "Subscription callback of node (%s) is on executable queue at %ld",
+      any_executable.node_base.get()->get_name(), ctime.tv_sec * 1000 + ctime.tv_usec / 1000);
   }
 
   if (any_executable.service != NULL) {
-    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Service callback of node (%s) is on executable queue at %ld", any_executable.node_base.get()->get_name(), ctime.tv_sec*1000+ctime.tv_usec/1000);    
+    RCLCPP_INFO(
+      rclcpp::get_logger(
+        "rclcpp"), "Service callback of node (%s) is on executable queue at %ld",
+      any_executable.node_base.get()->get_name(), ctime.tv_sec * 1000 + ctime.tv_usec / 1000);
   }
 
   if (any_executable.client != NULL) {
-    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Client callback of node (%s) is on executable queue at %ld", any_executable.node_base.get()->get_name(), ctime.tv_sec*1000+ctime.tv_usec/1000);    
+    RCLCPP_INFO(
+      rclcpp::get_logger(
+        "rclcpp"), "Client callback of node (%s) is on executable queue at %ld",
+      any_executable.node_base.get()->get_name(), ctime.tv_sec * 1000 + ctime.tv_usec / 1000);
   }
 
   if (any_executable.waitable != NULL) {
     //auto group = get_group_by_waitable(any_executable.waitable, weak_nodes_);
     //auto node = get_node_by_group(group, weak_nodes_);
-    //RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Waitable callback of node (%s) is on executable queue at %ld", node.get()->get_name(), ctime.tv_sec*1000+ctime.tv_usec/1000);    
-    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "[print_list_ready_executable] A waitable callback is on executable queue at %ld", ctime.tv_sec*1000+ctime.tv_usec/1000);    
+    //RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Waitable callback of node (%s) is on executable queue at %ld", node.get()->get_name(), ctime.tv_sec*1000+ctime.tv_usec/1000);
+    RCLCPP_INFO(
+      rclcpp::get_logger(
+        "rclcpp"), "[print_list_ready_executable] A waitable callback is on executable queue at %ld",
+      ctime.tv_sec * 1000 + ctime.tv_usec / 1000);
   }
-  
+
 }
 #endif
 

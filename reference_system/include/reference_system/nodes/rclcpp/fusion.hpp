@@ -56,13 +56,14 @@ private:
     const uint64_t input_number,
     const message_t::SharedPtr input_message)
   {
-gettimeofday(&c1, NULL);
+    gettimeofday(&c1, NULL);
     uint64_t timestamp = now_as_int();
     subscriptions_[input_number].cache = input_message;
-gettimeofday(&c2, NULL);
-    if(input_number != 0){
-      std::cout << "Fusion " << this->get_name() << ": " << (c2.tv_sec - c1.tv_sec) * 1000000 + (c2.tv_usec - c1.tv_usec) << std::endl;
-      volatile auto number_cruncher_result = number_cruncher(number_crunch_limit_/4); // 2ms delay
+    gettimeofday(&c2, NULL);
+    if (input_number != 0) {
+      std::cout << "Fusion " << this->get_name() << ": " <<
+        (c2.tv_sec - c1.tv_sec) * 1000000 + (c2.tv_usec - c1.tv_usec) << std::endl;
+      volatile auto number_cruncher_result = number_cruncher(number_crunch_limit_ / 4); // 2ms delay
       return;
     }
     // only process and publish when we can perform an actual fusion, this means
@@ -72,7 +73,7 @@ gettimeofday(&c2, NULL);
     }
 
     auto number_cruncher_result = number_cruncher(number_crunch_limit_);
-gettimeofday(&c3, NULL);
+    gettimeofday(&c3, NULL);
     auto output_message = publisher_->borrow_loaned_message();
 
     uint32_t missed_samples = get_missed_samples_and_update_seq_nr(
@@ -92,8 +93,10 @@ gettimeofday(&c3, NULL);
 
     output_message.get().data[0] = number_cruncher_result;
     publisher_->publish(std::move(output_message));
-gettimeofday(&c4, NULL);
-    std::cout << "Fusion " << this->get_name() << " Trigger: " << (c4.tv_sec - c3.tv_sec) * 1000000 + (c4.tv_usec - c3.tv_usec) + (c2.tv_sec - c1.tv_sec)*1000000 + (c2.tv_usec - c1.tv_usec)  << std::endl;
+    gettimeofday(&c4, NULL);
+    std::cout << "Fusion " << this->get_name() << " Trigger: " <<
+      (c4.tv_sec - c3.tv_sec) * 1000000 + (c4.tv_usec - c3.tv_usec) + (c2.tv_sec - c1.tv_sec) *
+      1000000 + (c2.tv_usec - c1.tv_usec) << std::endl;
     // subscriptions_[0].cache.reset();
     // subscriptions_[1].cache.reset();
   }

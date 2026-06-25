@@ -50,7 +50,8 @@ private:
     uint32_t missed_samples = get_missed_samples_and_update_seq_nr(input_message, sequence_number_);
     print_sample_path(this->get_name(), missed_samples, input_message);
     gettimeofday(&c2, NULL);
-    std::cout << "Command " << this->get_name() << ": " <<(c2.tv_sec - c1.tv_sec) * 1000000 + (c2.tv_usec - c1.tv_usec) << std::endl;
+    std::cout << "Command " << this->get_name() << ": " <<
+      (c2.tv_sec - c1.tv_sec) * 1000000 + (c2.tv_usec - c1.tv_usec) << std::endl;
 
   }
 

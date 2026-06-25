@@ -27,7 +27,7 @@ using rclcpp::executors::MultiThreadedExecutor;
 
 #ifdef PICAS
 #include <cerrno>
-static long int sched_setattr(pid_t pid, const struct sched_attr *attr, unsigned int flags)
+static long int sched_setattr(pid_t pid, const struct sched_attr * attr, unsigned int flags)
 {
   return syscall(__NR_sched_setattr, pid, attr, flags);
 }
@@ -60,8 +60,8 @@ MultiThreadedExecutor::MultiThreadedExecutor(
   rt_attr.sched_priority = 0;
   rt_attr.sched_policy = 0;
   rt_attr.sched_runtime = 0;
-  rt_attr.sched_period  = 0;
-  rt_attr.sched_deadline= 0;  
+  rt_attr.sched_period = 0;
+  rt_attr.sched_deadline = 0;
 #endif
 }
 
@@ -101,26 +101,39 @@ void
 MultiThreadedExecutor::run(size_t thread_id)
 {
   if (cpus.size() > 0 && cpus.size() <= thread_id) {
-    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "MultiThreadedExecutor: spin: Thread %lu (PID %ld): no CPU assigned", thread_id, gettid());
-  }
-  else {
-    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "MultiThreadedExecutor: spin: Thread %lu (PID %ld) on CPU %d", thread_id, gettid(), cpus[thread_id]);
+    RCLCPP_INFO(
+      rclcpp::get_logger(
+        "rclcpp"), "MultiThreadedExecutor: spin: Thread %lu (PID %ld): no CPU assigned", thread_id,
+      gettid());
+  } else {
+    RCLCPP_INFO(
+      rclcpp::get_logger(
+        "rclcpp"), "MultiThreadedExecutor: spin: Thread %lu (PID %ld) on CPU %d", thread_id,
+      gettid(), cpus[thread_id]);
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
     CPU_SET(cpus[thread_id], &cpuset);
-    if(pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset)) {
-        RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "MultiThreadedExecutor: spin: Thread %lu: spin_cpu has an error", thread_id);
+    if (pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset)) {
+      RCLCPP_INFO(
+        rclcpp::get_logger(
+          "rclcpp"), "MultiThreadedExecutor: spin: Thread %lu: spin_cpu has an error", thread_id);
     }
   }
   if (rt_attr.sched_policy != 0) {
     long int ret;
     unsigned int flags = 0;
-    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "MultiThreadedExecutor: spin: Thread %lu (PID %ld) %s prio %d", thread_id, gettid(), 
+    RCLCPP_INFO(
+      rclcpp::get_logger(
+        "rclcpp"), "MultiThreadedExecutor: spin: Thread %lu (PID %ld) %s prio %d", thread_id,
+      gettid(),
       rt_attr.sched_policy == SCHED_FIFO ? "FIFO" : rt_attr.sched_policy == SCHED_RR ? "RR" : rt_attr.sched_policy == SCHED_DEADLINE ? "DEADLINE" : "N/A",
       rt_attr.sched_priority);
     ret = sched_setattr(0, &rt_attr, flags);
     if (ret < 0) {
-      RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "MultiThreadedExecutor: spin: Thread %lu: sched_setattr has an error (%s)", thread_id, strerror(errno));
+      RCLCPP_INFO(
+        rclcpp::get_logger(
+          "rclcpp"), "MultiThreadedExecutor: spin: Thread %lu: sched_setattr has an error (%s)", thread_id, strerror(
+          errno));
     }
   }
 #else

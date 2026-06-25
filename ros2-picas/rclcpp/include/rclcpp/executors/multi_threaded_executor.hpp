@@ -38,22 +38,23 @@
 // for sched_deadline
 #include <pthread.h>
 #define gettid() syscall(__NR_gettid)
-struct sched_attr {
-    int32_t size;
+struct sched_attr
+{
+  int32_t size;
 
-    int32_t sched_policy;
-    int64_t sched_flags;
+  int32_t sched_policy;
+  int64_t sched_flags;
 
-    /* SCHED_NORMAL, SCHED_BATCH */
-    int32_t sched_nice;
+  /* SCHED_NORMAL, SCHED_BATCH */
+  int32_t sched_nice;
 
-    /* SCHED_FIFO, SCHED_RR */
-    int32_t sched_priority;
+  /* SCHED_FIFO, SCHED_RR */
+  int32_t sched_priority;
 
-    /* SCHED_DEADLINE (nsec) */
-    int64_t sched_runtime;
-    int64_t sched_deadline;
-    int64_t sched_period;
+  /* SCHED_DEADLINE (nsec) */
+  int64_t sched_runtime;
+  int64_t sched_deadline;
+  int64_t sched_period;
 };
 #endif
 
