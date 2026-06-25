@@ -72,6 +72,14 @@ def individual(data_model, size):
     dropped_df = data_dict['dropped']
     latency_df = data_dict['latency']
     run_time = data_dict['run_time']
+    # If the trace did not contain FrontLidarDriver / ObjectCollisionEstimator callbacks
+    # (see parseData), skip the dropped/latency figures and return a placeholder so that
+    # the parent report (generate_reports.py) still saves the HTML file successfully.
+    if latency_df.empty:
+        return [Div(
+            text='<b>Dropped Messages / Latency report skipped:</b> '
+                 'no FrontLidarDriver or ObjectCollisionEstimator callbacks found in this trace.',
+            width=size, height=size)]
 
     y = list(zip(dropped_df.node, dropped_df.topic))
 
@@ -231,6 +239,25 @@ def parseData(data_model):
             [str(node), str(topic), float(len(callback_df)), period, 0.0, 0.0, colors[color_i]])
         color_i += 1
 
+    # If no FrontLidarDriver / ObjectCollisionEstimator callbacks were present in the trace
+    # (e.g. picas_single_executor with different callback symbol naming), skip the latency
+    # computation instead of raising KeyError downstream. Still return a well-formed
+    # data_dict with empty latency so the caller (individual) can short-circuit cleanly.
+    if front_lidar_data.empty or object_collision_data.empty:
+        dropped_df = pd.DataFrame(
+            dropped_data,
+            columns=['node', 'topic', 'count', 'period', 'dropped', 'expected_count', 'color'])
+        approx_run_time = None
+        if earliest_date is not None and latest_date is not None:
+            approx_run_time = getRunTime(earliest_date, latest_date)
+        return {
+            'dropped': dropped_df,
+            'latency': pd.DataFrame(),
+            'node_graph': None,
+            'start': earliest_date,
+            'end': latest_date,
+            'run_time': approx_run_time,
+        }
     front_lidar_data = front_lidar_data.reset_index(drop=True)
     object_collision_data = object_collision_data.reset_index(drop=True)
 
