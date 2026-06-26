@@ -77,8 +77,9 @@ private:
     output_message.get().data[0] = number_cruncher_result;
     connections_[id].publisher->publish(std::move(output_message));
     gettimeofday(&c2, NULL);
-    std::cout << "Intersection " << this->get_name() << ": " <<
-      (c2.tv_sec - c1.tv_sec) * 1000000 + (c2.tv_usec - c1.tv_usec) << std::endl;
+    print_execution_time(
+      "Intersection", this->get_name(),
+      (c2.tv_sec - c1.tv_sec) * 1000000 + (c2.tv_usec - c1.tv_usec));
   }
 
 private:

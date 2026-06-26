@@ -100,7 +100,7 @@ MultiThreadedExecutor::get_number_of_threads()
 void
 MultiThreadedExecutor::run(size_t thread_id)
 {
-  if (cpus.size() > 0 && cpus.size() <= thread_id) {
+  if (cpus.size() <= thread_id) {
     RCLCPP_INFO(
       rclcpp::get_logger(
         "rclcpp"), "MultiThreadedExecutor: spin: Thread %lu (PID %ld): no CPU assigned", thread_id,

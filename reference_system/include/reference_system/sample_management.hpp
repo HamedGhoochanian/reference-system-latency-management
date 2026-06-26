@@ -24,6 +24,22 @@
 
 #include "reference_system/msg_types.hpp"
 
+inline std::mutex & reference_system_cout_mutex()
+{
+  static std::mutex mutex;
+  return mutex;
+}
+
+template<typename DurationT>
+void print_execution_time(
+  const std::string & node_type,
+  const std::string & node_name,
+  const DurationT duration)
+{
+  std::lock_guard<std::mutex> lock(reference_system_cout_mutex());
+  std::cout << node_type << " " << node_name << ": " << duration << std::endl;
+}
+
 bool set_benchmark_mode(const bool has_benchmark_mode, const bool set_value = true)
 {
   static bool value{false};
@@ -190,11 +206,15 @@ void print_sample_path(
   const uint32_t lost_samples,
   const SampleTypePointer & sample)
 {
+  if (is_in_benchmark_mode() || sample->size <= 0) {return;}
+
+  std::lock_guard<std::mutex> lock(reference_system_cout_mutex());
+
   static int benchmark_counter = 0;
   ++benchmark_counter;
 
   // benchmark_counter = dismissing first 100 samples to get rid of startup jitter
-  if (is_in_benchmark_mode() || sample->size <= 0 || benchmark_counter < 10) {return;}
+  if (benchmark_counter < 10) {return;}
 
   static std::map<std::string, sample_statistic_t> advanced_statistics;
   static std::map<std::string, std::map<std::string, statistic_value_t>> dropped_samples;
@@ -216,9 +236,6 @@ void print_sample_path(
     std::chrono::duration_cast<std::chrono::nanoseconds>(
       std::chrono::system_clock::now().time_since_epoch())
     .count());
-
-  static std::mutex cout_mutex;
-  std::lock_guard<std::mutex> lock(cout_mutex);
 
   std::cout << "----------------------------------------------------------" <<
     std::endl;

@@ -61,8 +61,9 @@ private:
     subscriptions_[input_number].cache = input_message;
     gettimeofday(&c2, NULL);
     if (input_number != 0) {
-      std::cout << "Fusion " << this->get_name() << ": " <<
-        (c2.tv_sec - c1.tv_sec) * 1000000 + (c2.tv_usec - c1.tv_usec) << std::endl;
+      print_execution_time(
+        "Fusion", this->get_name(),
+        (c2.tv_sec - c1.tv_sec) * 1000000 + (c2.tv_usec - c1.tv_usec));
       volatile auto number_cruncher_result = number_cruncher(number_crunch_limit_ / 4); // 2ms delay
       return;
     }
@@ -94,9 +95,10 @@ private:
     output_message.get().data[0] = number_cruncher_result;
     publisher_->publish(std::move(output_message));
     gettimeofday(&c4, NULL);
-    std::cout << "Fusion " << this->get_name() << " Trigger: " <<
-      (c4.tv_sec - c3.tv_sec) * 1000000 + (c4.tv_usec - c3.tv_usec) + (c2.tv_sec - c1.tv_sec) *
-      1000000 + (c2.tv_usec - c1.tv_usec) << std::endl;
+    print_execution_time(
+      "Fusion", std::string(this->get_name()) + " Trigger",
+      (c4.tv_sec - c3.tv_sec) * 1000000 + (c4.tv_usec - c3.tv_usec) +
+      (c2.tv_sec - c1.tv_sec) * 1000000 + (c2.tv_usec - c1.tv_usec));
     // subscriptions_[0].cache.reset();
     // subscriptions_[1].cache.reset();
   }

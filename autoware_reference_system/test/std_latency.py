@@ -22,6 +22,18 @@ from bokeh.transform import factor_cmap
 import pandas as pd
 
 
+def emptyStats():
+    nan = float('nan')
+    return {
+        'low': nan,
+        'mean': nan,
+        'high': nan,
+        'std_dev': nan,
+        'top': nan,
+        'bottom': nan
+    }
+
+
 def summary(path, duration, size):
     data, test_name, hot_path_name = parseLogSummary(path, duration)
     x = []
@@ -40,27 +52,33 @@ def summary(path, duration, size):
         exe = results[0]
         rmw = results[1]
         for data_type in results[2]['hot_path']:
+            stats = results[2]['hot_path'][data_type]
+            if not stats:
+                stats = emptyStats()
             all_data['exe'].append(exe)
             all_data['rmw'].append(rmw)
             all_data['type'].append(data_type)
-            all_data['low'].append(results[2]['hot_path'][data_type]['low'])
-            all_data['mean'].append(results[2]['hot_path'][data_type]['mean'])
-            all_data['high'].append(results[2]['hot_path'][data_type]['high'])
-            all_data['std_dev'].append(results[2]['hot_path'][data_type]['std_dev'])
-            all_data['top'].append(results[2]['hot_path'][data_type]['top'])
-            all_data['bottom'].append(results[2]['hot_path'][data_type]['bottom'])
+            all_data['low'].append(stats['low'])
+            all_data['mean'].append(stats['mean'])
+            all_data['high'].append(stats['high'])
+            all_data['std_dev'].append(stats['std_dev'])
+            all_data['top'].append(stats['top'])
+            all_data['bottom'].append(stats['bottom'])
         # add behavior planner data to dataframe
         cyclic_node = 'behavior_planner'
         data_type = 'period'
+        stats = results[2][cyclic_node][data_type]
+        if not stats:
+            stats = emptyStats()
         all_data['exe'].append(exe)
         all_data['rmw'].append(rmw)
         all_data['type'].append(data_type)
-        all_data['low'].append(results[2][cyclic_node][data_type]['low'])
-        all_data['mean'].append(results[2][cyclic_node][data_type]['mean'])
-        all_data['high'].append(results[2][cyclic_node][data_type]['high'])
-        all_data['std_dev'].append(results[2][cyclic_node][data_type]['std_dev'])
-        all_data['top'].append(results[2][cyclic_node][data_type]['top'])
-        all_data['bottom'].append(results[2][cyclic_node][data_type]['bottom'])
+        all_data['low'].append(stats['low'])
+        all_data['mean'].append(stats['mean'])
+        all_data['high'].append(stats['high'])
+        all_data['std_dev'].append(stats['std_dev'])
+        all_data['top'].append(stats['top'])
+        all_data['bottom'].append(stats['bottom'])
     df = pd.DataFrame.from_records(
         all_data, columns=[
             'exe', 'rmw', 'type', 'low', 'mean', 'high', 'top', 'bottom', 'std_dev'])
