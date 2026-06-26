@@ -127,7 +127,7 @@ if(${BUILD_TESTING})
 
     # Add more run times here (time to run traces for)
     set(RUN_TIMES
-      5
+      30
       # 10
       # 30
       # 60
