@@ -13,8 +13,10 @@
 // limitations under the License.
 #ifndef AUTOWARE_REFERENCE_SYSTEM__AUTOWARE_SYSTEM_BUILDER_HPP_
 #define AUTOWARE_REFERENCE_SYSTEM__AUTOWARE_SYSTEM_BUILDER_HPP_
+#include <algorithm>
 #include <chrono>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "reference_system/nodes/settings.hpp"
@@ -28,7 +30,7 @@ using CallbackPriority = callback::priority::Default;
 #endif
 
 template<typename SystemType, typename TimingConfig>
-auto create_autoware_nodes()
+auto create_autoware_nodes(const std::vector<std::string> & selected_node_names = {})
 ->std::vector<std::shared_ptr<typename SystemType::NodeBaseType>>
 {
   std::vector<std::shared_ptr<typename SystemType::NodeBaseType>> nodes;
@@ -345,6 +347,18 @@ auto create_autoware_nodes()
     #endif
   }));
 #pragma GCC diagnostic pop
+
+  if (!selected_node_names.empty()) {
+    // ponytail: 24-node linear scan is clearer than a registry; replace only if graph grows.
+    nodes.erase(
+      std::remove_if(
+        nodes.begin(), nodes.end(), [&selected_node_names](const auto & node) {
+          return std::find(
+            selected_node_names.begin(), selected_node_names.end(), node->get_name()) ==
+                 selected_node_names.end();
+        }),
+      nodes.end());
+  }
 
   return nodes;
 }
