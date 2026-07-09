@@ -62,6 +62,10 @@ ament_auto_add_executable(autoware_group_staticsinglethreaded
   src/ros2/executor/autoware_group_staticsinglethreaded.cpp
 )
 
+ament_auto_add_executable(autoware_node_staticsinglethreaded
+  src/ros2/executor/autoware_node_staticsinglethreaded.cpp
+)
+
 # Multi Threaded Executor
 ament_auto_add_executable(autoware_default_multithreaded
   src/ros2/executor/autoware_default_multithreaded.cpp
