@@ -48,7 +48,48 @@ private:
   {
     gettimeofday(&c1, NULL);
     uint32_t missed_samples = get_missed_samples_and_update_seq_nr(input_message, sequence_number_);
-    print_sample_path(this->get_name(), missed_samples, input_message);
+
+    uint64_t sink_timestamp = now_as_int();
+
+    if (is_structured_output_enabled()) {
+      std::string node_name = this->get_name();
+      auto nodes = extract_node_names(input_message);
+      std::vector<std::string> lineage = extract_lineage(input_message);
+      lineage.push_back(node_name);
+
+      if (node_name == "VehicleDBWSystem" && validate_dbw_lineage(nodes)) {
+        std::string source_node = extract_source_node(input_message, true);
+        if (!source_node.empty()) {
+          uint32_t src_seq = extract_source_sequence(input_message, source_node);
+          uint64_t src_ts = extract_source_timestamp(input_message, source_node);
+          uint64_t latency = sink_timestamp - src_ts;
+          uint32_t drops = sum_drops(input_message, nodes) + missed_samples;
+          emit_structured_chain_record(
+            "perception_localization_planning_control_to_dbw",
+            source_node, src_seq, src_ts,
+            node_name, 0, sink_timestamp,
+            latency, lineage, "completed", drops);
+        }
+      } else if (node_name == "IntersectionOutput" && validate_intersection_lineage(nodes)) {
+        auto intersection_nodes = nodes;
+        intersection_nodes.insert(node_name);
+        std::string source_node = "EuclideanClusterSettings";
+        uint32_t src_seq = extract_source_sequence(input_message, source_node);
+        uint64_t src_ts = extract_source_timestamp(input_message, source_node);
+        uint64_t latency = (src_ts > 0) ? sink_timestamp - src_ts : 0;
+        uint32_t drops = sum_drops(input_message, nodes) + missed_samples;
+        emit_structured_chain_record(
+          "euclidean_settings_to_intersection_output",
+          source_node, src_seq, src_ts,
+          node_name, 0, sink_timestamp,
+          latency, lineage, "completed", drops);
+      }
+    }
+
+    if (is_legacy_verbose_output_enabled()) {
+      print_sample_path(this->get_name(), missed_samples, input_message);
+    }
+
     gettimeofday(&c2, NULL);
     print_execution_time(
       "Command", this->get_name(),

@@ -64,6 +64,28 @@ private:
       this->get_name(), sequence_number_++, missed_samples, timestamp,
       output_message.get());
 
+    uint64_t sink_timestamp = now_as_int();
+
+    std::string node_name = this->get_name();
+    if (is_structured_output_enabled() && node_name == "ObjectCollisionEstimator") {
+      auto nodes = extract_node_names(&output_message.get());
+      if (validate_hot_path_lineage(nodes)) {
+        std::string source_node = extract_source_node(&output_message.get(), false);
+        if (!source_node.empty()) {
+          uint32_t src_seq = extract_source_sequence(&output_message.get(), source_node);
+          uint64_t src_ts = extract_source_timestamp(&output_message.get(), source_node);
+          uint64_t latency = sink_timestamp - src_ts;
+          uint32_t drops = sum_drops(&output_message.get(), nodes);
+          std::vector<std::string> lineage = extract_lineage(&output_message.get());
+          emit_structured_chain_record(
+            "perception_collision_hot_path",
+            source_node, src_seq, src_ts,
+            node_name, sequence_number_ - 1, sink_timestamp,
+            latency, lineage, "completed", drops);
+        }
+      }
+    }
+
     // use result so that it is not optimizied away by some clever compiler
     output_message.get().data[0] = number_cruncher_result;
     publisher_->publish(std::move(output_message));

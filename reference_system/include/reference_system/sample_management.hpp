@@ -15,7 +15,10 @@
 #define REFERENCE_SYSTEM__SAMPLE_MANAGEMENT_HPP_
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <map>
+#include <set>
+#include <sstream>
 #include <string>
 #include <iostream>
 #include <vector>
@@ -58,6 +61,180 @@ uint64_t now_as_int()
     std::chrono::duration_cast<std::chrono::nanoseconds>(
       std::chrono::system_clock::now().time_since_epoch())
     .count());
+}
+
+bool set_structured_output_enabled(const bool enabled, const bool set_value = true)
+{
+  static bool value{true};
+  if (set_value) {value = enabled;}
+  return value;
+}
+
+bool is_structured_output_enabled()
+{
+  return set_structured_output_enabled(false, false);
+}
+
+bool set_legacy_verbose_output_enabled(const bool enabled, const bool set_value = true)
+{
+  static bool value{false};
+  if (set_value) {value = enabled;}
+  return value;
+}
+
+bool is_legacy_verbose_output_enabled()
+{
+  return set_legacy_verbose_output_enabled(false, false);
+}
+
+template<typename SampleTypePointer>
+std::string node_name_at(const SampleTypePointer & sample, uint64_t idx)
+{
+  return std::string(reinterpret_cast<const char *>(sample->stats[idx].node_name.data()));
+}
+
+template<typename SampleTypePointer>
+std::set<std::string> extract_node_names(const SampleTypePointer & sample)
+{
+  std::set<std::string> names;
+  for (uint64_t i = 0; i < sample->size; ++i) {
+    names.insert(node_name_at(sample, i));
+  }
+  return names;
+}
+
+template<typename SampleTypePointer>
+uint32_t sum_drops(const SampleTypePointer & sample, const std::set<std::string> & lineage)
+{
+  uint32_t total = 0;
+  for (uint64_t i = 0; i < sample->size; ++i) {
+    if (lineage.count(node_name_at(sample, i))) {
+      total += sample->stats[i].dropped_samples;
+    }
+  }
+  return total;
+}
+
+inline bool validate_hot_path_lineage(const std::set<std::string> & nodes)
+{
+  if (!nodes.count("ObjectCollisionEstimator")) return false;
+  if (!nodes.count("EuclideanClusterDetector")) return false;
+  if (!nodes.count("RayGroundFilter")) return false;
+  if (!nodes.count("PointCloudFusion")) return false;
+  bool has_lidar = nodes.count("FrontLidarDriver") || nodes.count("RearLidarDriver");
+  if (!has_lidar) return false;
+  return true;
+}
+
+inline bool validate_dbw_lineage(const std::set<std::string> & nodes)
+{
+  bool has_lidar = nodes.count("FrontLidarDriver") || nodes.count("RearLidarDriver");
+  if (!has_lidar) return false;
+  static const std::vector<std::string> required = {
+    "PointsTransformerFront", "PointsTransformerRear", "PointCloudFusion",
+    "VoxelGridDownsampler", "RayGroundFilter", "EuclideanClusterDetector",
+    "ObjectCollisionEstimator", "PointCloudMap", "PointCloudMapLoader",
+    "NDTLocalizer", "Visualizer", "Lanelet2GlobalPlanner", "Lanelet2Map",
+    "Lanelet2MapLoader", "ParkingPlanner", "LanePlanner",
+    "BehaviorPlanner", "MPCController", "VehicleInterface"
+  };
+  for (const auto & req : required) {
+    if (!nodes.count(req)) return false;
+  }
+  return true;
+}
+
+inline bool validate_intersection_lineage(const std::set<std::string> & nodes)
+{
+  return nodes.count("EuclideanClusterSettings") &&
+         nodes.count("EuclideanClusterDetector");
+}
+
+template<typename SampleTypePointer>
+std::string extract_source_node(
+  const SampleTypePointer & sample, bool use_earliest)
+{
+  std::string source_node;
+  uint64_t source_ts = use_earliest ? std::numeric_limits<uint64_t>::max() : 0;
+  for (uint64_t i = 0; i < sample->size; ++i) {
+    std::string name = node_name_at(sample, i);
+    if (name == "FrontLidarDriver" || name == "RearLidarDriver") {
+      uint64_t ts = sample->stats[i].timestamp;
+      if (use_earliest ? (ts < source_ts) : (ts > source_ts)) {
+        source_ts = ts;
+        source_node = name;
+      }
+    }
+  }
+  return source_node;
+}
+
+template<typename SampleTypePointer>
+uint32_t extract_source_sequence(const SampleTypePointer & sample, const std::string & source_node)
+{
+  for (uint64_t i = 0; i < sample->size; ++i) {
+    if (node_name_at(sample, i) == source_node) {
+      return sample->stats[i].sequence_number;
+    }
+  }
+  return 0;
+}
+
+template<typename SampleTypePointer>
+uint64_t extract_source_timestamp(const SampleTypePointer & sample, const std::string & source_node)
+{
+  for (uint64_t i = 0; i < sample->size; ++i) {
+    if (node_name_at(sample, i) == source_node) {
+      return sample->stats[i].timestamp;
+    }
+  }
+  return 0;
+}
+
+template<typename SampleTypePointer>
+std::vector<std::string> extract_lineage(const SampleTypePointer & sample)
+{
+  std::vector<std::string> lineage;
+  for (uint64_t i = 0; i < sample->size; ++i) {
+    lineage.push_back(node_name_at(sample, i));
+  }
+  return lineage;
+}
+
+inline void emit_structured_chain_record(
+  const std::string & chain_id,
+  const std::string & source_node,
+  uint32_t source_sequence,
+  uint64_t source_timestamp_ns,
+  const std::string & sink_node,
+  uint32_t sink_sequence,
+  uint64_t sink_timestamp_ns,
+  uint64_t latency_ns,
+  const std::vector<std::string> & lineage,
+  const std::string & status,
+  uint32_t drop_count)
+{
+  std::lock_guard<std::mutex> lock(reference_system_cout_mutex());
+  std::ostringstream oss;
+  oss << "{\"schema_version\":1";
+  oss << ",\"chain_id\":\"" << chain_id << "\"";
+  oss << ",\"source_node\":\"" << source_node << "\"";
+  oss << ",\"source_sequence\":" << source_sequence;
+  oss << ",\"source_timestamp_ns\":" << source_timestamp_ns;
+  oss << ",\"sink_node\":\"" << sink_node << "\"";
+  oss << ",\"sink_sequence\":" << sink_sequence;
+  oss << ",\"sink_timestamp_ns\":" << sink_timestamp_ns;
+  oss << ",\"latency_ns\":" << latency_ns;
+  oss << ",\"lineage\":[";
+  for (size_t i = 0U; i < lineage.size(); ++i) {
+    if (i > 0U) oss << ",";
+    oss << "\"" << lineage[i] << "\"";
+  }
+  oss << "]";
+  oss << ",\"status\":\"" << status << "\"";
+  oss << ",\"drop_count\":" << drop_count;
+  oss << "}";
+  std::cout << oss.str() << std::endl;
 }
 
 template<typename SampleTypePointer>
@@ -163,11 +340,13 @@ struct statistic_value_t
   {
     ++total_number;
     current = value;
-    average = ((total_number - 1) * average + value) / total_number;
+    double old_average = average;
+    average = ((total_number - 1) * old_average + value) / total_number;
+    double delta = static_cast<double>(value) - old_average;
+    double delta2 = static_cast<double>(value) - average;
     deviation =
       std::sqrt(
-      (deviation * deviation * (total_number - 1) + (average - value) * (average - value)) /
-      total_number);
+      (deviation * deviation * (total_number - 1) + delta * delta2) / total_number);
     min = std::min(min, value);
     max = std::max(max, value);
   }

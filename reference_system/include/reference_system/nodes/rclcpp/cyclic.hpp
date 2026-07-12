@@ -97,6 +97,24 @@ private:
       this->get_name(), sequence_number_++, missed_samples, timestamp,
       output_message.get());
 
+    uint64_t sink_timestamp = now_as_int();
+
+    if (is_structured_output_enabled() && previous_timestamp_ != 0) {
+      uint64_t period_ns = (timestamp - previous_timestamp_) /
+        std::max(sequence_number_ - 1 - previous_sequence_, 1U);
+      double period_ms = static_cast<double>(period_ns) / 1000000.0;
+      bool violated = std::abs(period_ms - 100.0) > 10.0;
+      std::vector<std::string> lineage{this->get_name()};
+      emit_structured_chain_record(
+        "behavior_planner_cyclic_jitter",
+        this->get_name(), sequence_number_ - 1, timestamp,
+        this->get_name(), sequence_number_ - 1, sink_timestamp,
+        period_ns, lineage,
+        violated ? "violated" : "completed", 0);
+    }
+    previous_timestamp_ = timestamp;
+    previous_sequence_ = sequence_number_ - 1;
+
     output_message.get().data[0] = number_cruncher_result;
     publisher_->publish(std::move(output_message));
     gettimeofday(&c2, NULL);
@@ -119,6 +137,8 @@ private:
   std::vector<subscription_t> subscriptions_;
   uint64_t number_crunch_limit_;
   uint32_t sequence_number_ = 0;
+  uint64_t previous_timestamp_ = 0;
+  uint32_t previous_sequence_ = 0;
 };
 }  // namespace rclcpp_system
 }  // namespace nodes
