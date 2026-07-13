@@ -72,14 +72,16 @@ private:
       if (validate_hot_path_lineage(nodes)) {
         auto src_id = extract_source_identity(&output_message.get(), false);
         if (!src_id.node_name.empty()) {
-          uint64_t latency = sink_timestamp - src_id.timestamp;
-          uint32_t drops = sum_drops(&output_message.get(), nodes);
-          std::vector<std::string> lineage = extract_lineage(&output_message.get());
-          emit_structured_chain_record(
-            "perception_collision_hot_path",
-            src_id.node_name, src_id.sequence_number, src_id.timestamp,
-            node_name, sequence_number_ - 1, sink_timestamp,
-            latency, lineage, "completed", drops);
+          uint64_t latency;
+          if (elapsed_ns(src_id.timestamp, sink_timestamp, latency)) {
+            uint32_t drops = sum_drops(&output_message.get(), nodes);
+            std::vector<std::string> lineage = extract_lineage(&output_message.get());
+            emit_structured_chain_record(
+              "perception_collision_hot_path",
+              src_id.node_name, src_id.sequence_number, src_id.timestamp,
+              node_name, sequence_number_ - 1, sink_timestamp,
+              latency, lineage, "completed", drops);
+          }
         }
       }
     }

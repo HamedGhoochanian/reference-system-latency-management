@@ -14,7 +14,9 @@
 #ifndef REFERENCE_SYSTEM__SAMPLE_MANAGEMENT_HPP_
 #define REFERENCE_SYSTEM__SAMPLE_MANAGEMENT_HPP_
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <climits>
 #include <cmath>
 #include <map>
 #include <set>
@@ -24,6 +26,7 @@
 #include <vector>
 #include <limits>
 #include <mutex>
+#include <unistd.h>
 
 #include "reference_system/msg_types.hpp"
 
@@ -85,6 +88,28 @@ bool set_legacy_verbose_output_enabled(const bool enabled, const bool set_value 
 bool is_legacy_verbose_output_enabled()
 {
   return set_legacy_verbose_output_enabled(false, false);
+}
+
+inline std::atomic<uint64_t> & structured_record_error_count()
+{
+  static std::atomic<uint64_t> count{0};
+  return count;
+}
+
+inline std::atomic<uint64_t> & metadata_overflow_count()
+{
+  static std::atomic<uint64_t> count{0};
+  return count;
+}
+
+inline bool elapsed_ns(uint64_t start, uint64_t end, uint64_t & elapsed)
+{
+  if (end < start) {
+    ++structured_record_error_count();
+    return false;
+  }
+  elapsed = end - start;
+  return true;
 }
 
 template<typename SampleTypePointer>
@@ -226,7 +251,7 @@ std::vector<std::string> extract_lineage(const SampleTypePointer & sample)
   return lineage;
 }
 
-inline void emit_structured_chain_record(
+inline std::string make_structured_chain_record(
   const std::string & chain_id,
   const std::string & source_node,
   uint32_t source_sequence,
@@ -239,7 +264,6 @@ inline void emit_structured_chain_record(
   const std::string & status,
   uint32_t drop_count)
 {
-  std::lock_guard<std::mutex> lock(reference_system_cout_mutex());
   std::ostringstream oss;
   oss << "{\"schema_version\":1";
   oss << ",\"chain_id\":\"" << chain_id << "\"";
@@ -258,8 +282,57 @@ inline void emit_structured_chain_record(
   oss << "]";
   oss << ",\"status\":\"" << status << "\"";
   oss << ",\"drop_count\":" << drop_count;
-  oss << "}";
-  std::cout << oss.str() << std::endl;
+  oss << ",\"instrumentation_error_count\":" << structured_record_error_count().load();
+  oss << ",\"metadata_overflow_count\":" << metadata_overflow_count().load();
+  oss << "}\n";
+  return oss.str();
+}
+
+inline bool write_structured_record(const std::string & record)
+{
+  if (record.size() > PIPE_BUF) {
+    ++structured_record_error_count();
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(reference_system_cout_mutex());
+  ssize_t written = write(STDOUT_FILENO, record.data(), record.size());
+  if (written != static_cast<ssize_t>(record.size())) {
+    ++structured_record_error_count();
+    return false;
+  }
+  return true;
+}
+
+inline bool emit_structured_chain_record(
+  const std::string & chain_id,
+  const std::string & source_node,
+  uint32_t source_sequence,
+  uint64_t source_timestamp_ns,
+  const std::string & sink_node,
+  uint32_t sink_sequence,
+  uint64_t sink_timestamp_ns,
+  uint64_t latency_ns,
+  const std::vector<std::string> & lineage,
+  const std::string & status,
+  uint32_t drop_count)
+{
+  return write_structured_record(make_structured_chain_record(
+      chain_id, source_node, source_sequence, source_timestamp_ns,
+      sink_node, sink_sequence, sink_timestamp_ns, latency_ns,
+      lineage, status, drop_count));
+}
+
+inline bool emit_structured_source_record(
+  const std::string & source_node, uint32_t source_sequence, uint64_t source_timestamp_ns)
+{
+  std::ostringstream oss;
+  oss << "{\"schema_version\":1,\"record_type\":\"source\"";
+  oss << ",\"source_node\":\"" << source_node << "\"";
+  oss << ",\"source_sequence\":" << source_sequence;
+  oss << ",\"source_timestamp_ns\":" << source_timestamp_ns;
+  oss << ",\"instrumentation_error_count\":" << structured_record_error_count().load();
+  oss << ",\"metadata_overflow_count\":" << metadata_overflow_count().load() << "}\n";
+  return write_structured_record(oss.str());
 }
 
 template<typename SampleTypePointer>
@@ -270,6 +343,7 @@ void set_sample(
   if (is_in_benchmark_mode() ) {return;}
 
   if (sample.size >= message_t::STATS_CAPACITY) {
+    ++metadata_overflow_count();
     return;
   }
 
@@ -346,6 +420,10 @@ void merge_history_into_sample(SampleTypePointer & sample, const SourceType & so
   }
 
   for (auto i : entries_to_add) {
+    if (sample.size >= message_t::STATS_CAPACITY) {
+      ++metadata_overflow_count();
+      break;
+    }
     memcpy(
       sample.stats.data() + sample.size, source->stats.data() + i,
       sizeof(reference_interfaces::msg::TransmissionStats));

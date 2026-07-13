@@ -52,9 +52,18 @@ private:
     auto message = publisher_->borrow_loaned_message();
     message.get().size = 0;
 
-    set_sample(this->get_name(), sequence_number_++, 0, timestamp, message.get());
+    uint32_t sequence = sequence_number_++;
+    set_sample(this->get_name(), sequence, 0, timestamp, message.get());
 
     publisher_->publish(std::move(message));
+    if (is_structured_output_enabled()) {
+      std::string node_name = this->get_name();
+      if (node_name == "FrontLidarDriver" || node_name == "RearLidarDriver" ||
+        node_name == "EuclideanClusterSettings")
+      {
+        emit_structured_source_record(node_name, sequence, timestamp);
+      }
+    }
     gettimeofday(&c2, NULL);
     print_execution_time(
       "Sensor", this->get_name(),

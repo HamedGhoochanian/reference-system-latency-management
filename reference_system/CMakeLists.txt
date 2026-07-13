@@ -25,6 +25,10 @@ target_include_directories(${PROJECT_NAME} INTERFACE
 if(${BUILD_TESTING})
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_sample_management test/test_sample_management.cpp)
+  ament_target_dependencies(test_sample_management rclcpp reference_interfaces)
+  target_link_libraries(test_sample_management ${PROJECT_NAME})
 endif()
 
 # Install
@@ -38,4 +42,3 @@ install(TARGETS ${PROJECT_NAME}
 
 ament_export_targets("export_${PROJECT_NAME}")
 ament_auto_package()
-

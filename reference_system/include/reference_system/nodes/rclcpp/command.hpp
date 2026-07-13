@@ -48,6 +48,7 @@ private:
   {
     gettimeofday(&c1, NULL);
     uint32_t missed_samples = get_missed_samples_and_update_seq_nr(input_message, sequence_number_);
+    uint32_t sink_sequence = sink_sequence_number_++;
 
     uint64_t sink_timestamp = now_as_int();
 
@@ -60,25 +61,29 @@ private:
       if (node_name == "VehicleDBWSystem" && validate_dbw_lineage(nodes)) {
         auto src_id = extract_source_identity(input_message, true);
         if (!src_id.node_name.empty()) {
-          uint64_t latency = sink_timestamp - src_id.timestamp;
-          uint32_t drops = sum_drops(input_message, nodes) + missed_samples;
-          emit_structured_chain_record(
-            "perception_localization_planning_control_to_dbw",
-            src_id.node_name, src_id.sequence_number, src_id.timestamp,
-            node_name, 0, sink_timestamp,
-            latency, lineage, "completed", drops);
+          uint64_t latency;
+          if (elapsed_ns(src_id.timestamp, sink_timestamp, latency)) {
+            uint32_t drops = sum_drops(input_message, nodes) + missed_samples;
+            emit_structured_chain_record(
+              "perception_localization_planning_control_to_dbw",
+              src_id.node_name, src_id.sequence_number, src_id.timestamp,
+              node_name, sink_sequence, sink_timestamp,
+              latency, lineage, "completed", drops);
+          }
         }
       } else if (node_name == "IntersectionOutput" && validate_intersection_lineage(nodes)) {
         auto it = nodes.find("EuclideanClusterSettings");
         if (it != nodes.end()) {
           uint64_t src_ts = it->second.timestamp;
-          uint64_t latency = sink_timestamp - src_ts;
-          uint32_t drops = sum_drops(input_message, nodes) + missed_samples;
-          emit_structured_chain_record(
-            "euclidean_settings_to_intersection_output",
-            "EuclideanClusterSettings", it->second.sequence_number, src_ts,
-            node_name, 0, sink_timestamp,
-            latency, lineage, "completed", drops);
+          uint64_t latency;
+          if (elapsed_ns(src_ts, sink_timestamp, latency)) {
+            uint32_t drops = sum_drops(input_message, nodes) + missed_samples;
+            emit_structured_chain_record(
+              "euclidean_settings_to_intersection_output",
+              "EuclideanClusterSettings", it->second.sequence_number, src_ts,
+              node_name, sink_sequence, sink_timestamp,
+              latency, lineage, "completed", drops);
+          }
         }
       }
     }
@@ -97,6 +102,7 @@ private:
 private:
   rclcpp::Subscription<message_t>::SharedPtr subscription_;
   uint32_t sequence_number_ = 0;
+  uint32_t sink_sequence_number_ = 0;
 };
 }  // namespace rclcpp_system
 }  // namespace nodes
