@@ -93,18 +93,45 @@ std::string node_name_at(const SampleTypePointer & sample, uint64_t idx)
   return std::string(reinterpret_cast<const char *>(sample->stats[idx].node_name.data()));
 }
 
-template<typename SampleTypePointer>
-std::set<std::string> extract_node_names(const SampleTypePointer & sample)
+struct node_map_t
 {
-  std::set<std::string> names;
+  uint64_t timestamp;
+  uint32_t sequence_number;
+  uint32_t dropped_samples;
+};
+
+template<typename SampleTypePointer>
+std::map<std::string, node_map_t> build_node_map(const SampleTypePointer & sample)
+{
+  std::map<std::string, node_map_t> nodes;
   for (uint64_t i = 0; i < sample->size; ++i) {
-    names.insert(node_name_at(sample, i));
+    std::string name = node_name_at(sample, i);
+    if (nodes.find(name) == nodes.end()) {
+      nodes[name] = {sample->stats[i].timestamp,
+                     sample->stats[i].sequence_number,
+                     sample->stats[i].dropped_samples};
+    }
   }
-  return names;
+  return nodes;
+}
+
+inline bool has_node(const std::map<std::string, node_map_t> & nodes, const std::string & name)
+{
+  return nodes.find(name) != nodes.end();
+}
+
+inline bool ts_before(
+  const std::map<std::string, node_map_t> & nodes,
+  const std::string & a, const std::string & b)
+{
+  auto ia = nodes.find(a);
+  auto ib = nodes.find(b);
+  if (ia == nodes.end() || ib == nodes.end()) return false;
+  return ia->second.timestamp < ib->second.timestamp;
 }
 
 template<typename SampleTypePointer>
-uint32_t sum_drops(const SampleTypePointer & sample, const std::set<std::string> & lineage)
+uint32_t sum_drops(const SampleTypePointer & sample, const std::map<std::string, node_map_t> & lineage)
 {
   uint32_t total = 0;
   for (uint64_t i = 0; i < sample->size; ++i) {
@@ -115,21 +142,55 @@ uint32_t sum_drops(const SampleTypePointer & sample, const std::set<std::string>
   return total;
 }
 
-inline bool validate_hot_path_lineage(const std::set<std::string> & nodes)
+struct source_identity_t
 {
-  if (!nodes.count("ObjectCollisionEstimator")) return false;
-  if (!nodes.count("EuclideanClusterDetector")) return false;
-  if (!nodes.count("RayGroundFilter")) return false;
-  if (!nodes.count("PointCloudFusion")) return false;
-  bool has_lidar = nodes.count("FrontLidarDriver") || nodes.count("RearLidarDriver");
-  if (!has_lidar) return false;
+  std::string node_name;
+  uint32_t sequence_number;
+  uint64_t timestamp;
+};
+
+template<typename SampleTypePointer>
+source_identity_t extract_source_identity(
+  const SampleTypePointer & sample, bool use_earliest)
+{
+  source_identity_t id{"", 0, use_earliest ? std::numeric_limits<uint64_t>::max() : 0};
+  for (uint64_t i = 0; i < sample->size; ++i) {
+    std::string name = node_name_at(sample, i);
+    if (name == "FrontLidarDriver" || name == "RearLidarDriver") {
+      uint64_t ts = sample->stats[i].timestamp;
+      if (use_earliest ? (ts < id.timestamp) : (ts > id.timestamp)) {
+        id.timestamp = ts;
+        id.node_name = name;
+        id.sequence_number = sample->stats[i].sequence_number;
+      }
+    }
+  }
+  return id;
+}
+
+inline bool validate_hot_path_lineage(const std::map<std::string, node_map_t> & nodes)
+{
+  if (!has_node(nodes, "ObjectCollisionEstimator")) return false;
+  if (!has_node(nodes, "EuclideanClusterDetector")) return false;
+  if (!has_node(nodes, "RayGroundFilter")) return false;
+  if (!has_node(nodes, "PointCloudFusion")) return false;
+  bool has_front = has_node(nodes, "FrontLidarDriver");
+  bool has_rear = has_node(nodes, "RearLidarDriver");
+  if (!has_front && !has_rear) return false;
+  if (has_front && !has_node(nodes, "PointsTransformerFront")) return false;
+  if (has_rear && !has_node(nodes, "PointsTransformerRear")) return false;
+  if (!ts_before(nodes, "RayGroundFilter", "EuclideanClusterDetector")) return false;
+  if (!ts_before(nodes, "EuclideanClusterDetector", "ObjectCollisionEstimator")) return false;
   return true;
 }
 
-inline bool validate_dbw_lineage(const std::set<std::string> & nodes)
+inline bool validate_dbw_lineage(const std::map<std::string, node_map_t> & nodes)
 {
-  bool has_lidar = nodes.count("FrontLidarDriver") || nodes.count("RearLidarDriver");
-  if (!has_lidar) return false;
+  bool has_front = has_node(nodes, "FrontLidarDriver");
+  bool has_rear = has_node(nodes, "RearLidarDriver");
+  if (!has_front && !has_rear) return false;
+  if (has_front && !has_node(nodes, "PointsTransformerFront")) return false;
+  if (has_rear && !has_node(nodes, "PointsTransformerRear")) return false;
   static const std::vector<std::string> required = {
     "PointsTransformerFront", "PointsTransformerRear", "PointCloudFusion",
     "VoxelGridDownsampler", "RayGroundFilter", "EuclideanClusterDetector",
@@ -139,56 +200,20 @@ inline bool validate_dbw_lineage(const std::set<std::string> & nodes)
     "BehaviorPlanner", "MPCController", "VehicleInterface"
   };
   for (const auto & req : required) {
-    if (!nodes.count(req)) return false;
+    if (!has_node(nodes, req)) return false;
   }
+  if (!ts_before(nodes, "PointCloudFusion", "VoxelGridDownsampler")) return false;
+  if (!ts_before(nodes, "BehaviorPlanner", "MPCController")) return false;
+  if (!ts_before(nodes, "MPCController", "VehicleInterface")) return false;
   return true;
 }
 
-inline bool validate_intersection_lineage(const std::set<std::string> & nodes)
+inline bool validate_intersection_lineage(const std::map<std::string, node_map_t> & nodes)
 {
-  return nodes.count("EuclideanClusterSettings") &&
-         nodes.count("EuclideanClusterDetector");
-}
-
-template<typename SampleTypePointer>
-std::string extract_source_node(
-  const SampleTypePointer & sample, bool use_earliest)
-{
-  std::string source_node;
-  uint64_t source_ts = use_earliest ? std::numeric_limits<uint64_t>::max() : 0;
-  for (uint64_t i = 0; i < sample->size; ++i) {
-    std::string name = node_name_at(sample, i);
-    if (name == "FrontLidarDriver" || name == "RearLidarDriver") {
-      uint64_t ts = sample->stats[i].timestamp;
-      if (use_earliest ? (ts < source_ts) : (ts > source_ts)) {
-        source_ts = ts;
-        source_node = name;
-      }
-    }
-  }
-  return source_node;
-}
-
-template<typename SampleTypePointer>
-uint32_t extract_source_sequence(const SampleTypePointer & sample, const std::string & source_node)
-{
-  for (uint64_t i = 0; i < sample->size; ++i) {
-    if (node_name_at(sample, i) == source_node) {
-      return sample->stats[i].sequence_number;
-    }
-  }
-  return 0;
-}
-
-template<typename SampleTypePointer>
-uint64_t extract_source_timestamp(const SampleTypePointer & sample, const std::string & source_node)
-{
-  for (uint64_t i = 0; i < sample->size; ++i) {
-    if (node_name_at(sample, i) == source_node) {
-      return sample->stats[i].timestamp;
-    }
-  }
-  return 0;
+  if (!has_node(nodes, "EuclideanClusterSettings")) return false;
+  if (!has_node(nodes, "EuclideanClusterDetector")) return false;
+  if (has_node(nodes, "RayGroundFilter")) return false;
+  return true;
 }
 
 template<typename SampleTypePointer>
@@ -305,10 +330,13 @@ void merge_history_into_sample(SampleTypePointer & sample, const SourceType & so
   for (uint64_t i = 0; i < source->size; ++i) {
     bool entry_found = false;
     std::string source_name((const char *)source->stats[i].node_name.data());
+    uint32_t source_seq = source->stats[i].sequence_number;
 
     for (uint64_t k = 0; k < sample.size; ++k) {
       std::string sample_name((const char *)sample.stats[k].node_name.data());
-      if (source_name == sample_name) {
+      if (source_name == sample_name &&
+          source_seq == sample.stats[k].sequence_number)
+      {
         entry_found = true;
         break;
       }

@@ -53,36 +53,33 @@ private:
 
     if (is_structured_output_enabled()) {
       std::string node_name = this->get_name();
-      auto nodes = extract_node_names(input_message);
+      auto nodes = build_node_map(input_message);
       std::vector<std::string> lineage = extract_lineage(input_message);
       lineage.push_back(node_name);
 
       if (node_name == "VehicleDBWSystem" && validate_dbw_lineage(nodes)) {
-        std::string source_node = extract_source_node(input_message, true);
-        if (!source_node.empty()) {
-          uint32_t src_seq = extract_source_sequence(input_message, source_node);
-          uint64_t src_ts = extract_source_timestamp(input_message, source_node);
-          uint64_t latency = sink_timestamp - src_ts;
+        auto src_id = extract_source_identity(input_message, true);
+        if (!src_id.node_name.empty()) {
+          uint64_t latency = sink_timestamp - src_id.timestamp;
           uint32_t drops = sum_drops(input_message, nodes) + missed_samples;
           emit_structured_chain_record(
             "perception_localization_planning_control_to_dbw",
-            source_node, src_seq, src_ts,
+            src_id.node_name, src_id.sequence_number, src_id.timestamp,
             node_name, 0, sink_timestamp,
             latency, lineage, "completed", drops);
         }
       } else if (node_name == "IntersectionOutput" && validate_intersection_lineage(nodes)) {
-        auto intersection_nodes = nodes;
-        intersection_nodes.insert(node_name);
-        std::string source_node = "EuclideanClusterSettings";
-        uint32_t src_seq = extract_source_sequence(input_message, source_node);
-        uint64_t src_ts = extract_source_timestamp(input_message, source_node);
-        uint64_t latency = (src_ts > 0) ? sink_timestamp - src_ts : 0;
-        uint32_t drops = sum_drops(input_message, nodes) + missed_samples;
-        emit_structured_chain_record(
-          "euclidean_settings_to_intersection_output",
-          source_node, src_seq, src_ts,
-          node_name, 0, sink_timestamp,
-          latency, lineage, "completed", drops);
+        auto it = nodes.find("EuclideanClusterSettings");
+        if (it != nodes.end()) {
+          uint64_t src_ts = it->second.timestamp;
+          uint64_t latency = sink_timestamp - src_ts;
+          uint32_t drops = sum_drops(input_message, nodes) + missed_samples;
+          emit_structured_chain_record(
+            "euclidean_settings_to_intersection_output",
+            "EuclideanClusterSettings", it->second.sequence_number, src_ts,
+            node_name, 0, sink_timestamp,
+            latency, lineage, "completed", drops);
+        }
       }
     }
 
