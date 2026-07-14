@@ -18,8 +18,8 @@
 #include <chrono>
 #include <climits>
 #include <cmath>
+#include <cstring>
 #include <map>
-#include <set>
 #include <sstream>
 #include <string>
 #include <iostream>
@@ -120,7 +120,9 @@ inline const char * deadline_status(uint64_t latency_ns, uint64_t deadline_ns)
 template<typename SampleTypePointer>
 std::string node_name_at(const SampleTypePointer & sample, uint64_t idx)
 {
-  return std::string(reinterpret_cast<const char *>(sample->stats[idx].node_name.data()));
+  const auto & node_name = sample->stats[idx].node_name;
+  const auto end = std::find(node_name.begin(), node_name.end(), '\0');
+  return std::string(node_name.data(), end);
 }
 
 struct node_map_t
@@ -148,6 +150,16 @@ std::map<std::string, node_map_t> build_node_map(const SampleTypePointer & sampl
 inline bool has_node(const std::map<std::string, node_map_t> & nodes, const std::string & name)
 {
   return nodes.find(name) != nodes.end();
+}
+
+inline bool has_exact_nodes(
+  const std::map<std::string, node_map_t> & nodes,
+  const std::vector<std::string> & expected)
+{
+  return nodes.size() == expected.size() &&
+         std::all_of(
+    expected.begin(), expected.end(),
+    [&nodes](const std::string & name) {return has_node(nodes, name);});
 }
 
 inline bool ts_before(
@@ -179,36 +191,75 @@ struct source_identity_t
   uint64_t timestamp;
 };
 
-template<typename SampleTypePointer>
-source_identity_t extract_source_identity(
-  const SampleTypePointer & sample, bool use_earliest)
+inline bool is_newer_source_identity(
+  const source_identity_t & candidate, const source_identity_t & current)
 {
-  source_identity_t id{"", 0, use_earliest ? std::numeric_limits<uint64_t>::max() : 0};
+  return candidate.sequence_number > current.sequence_number ||
+         (candidate.sequence_number == current.sequence_number &&
+         candidate.timestamp > current.timestamp);
+}
+
+inline bool source_reference_before(
+  const source_identity_t & a, const source_identity_t & b)
+{
+  if (a.timestamp != b.timestamp) return a.timestamp < b.timestamp;
+  if (a.node_name != b.node_name) return a.node_name < b.node_name;
+  return a.sequence_number < b.sequence_number;
+}
+
+template<typename SampleTypePointer>
+std::vector<source_identity_t> extract_source_roots(
+  const SampleTypePointer & sample, const std::vector<std::string> & source_nodes)
+{
+  std::map<std::string, source_identity_t> roots;
   for (uint64_t i = 0; i < sample->size; ++i) {
     std::string name = node_name_at(sample, i);
-    if (name == "FrontLidarDriver" || name == "RearLidarDriver") {
-      uint64_t ts = sample->stats[i].timestamp;
-      if (use_earliest ? (ts < id.timestamp) : (ts > id.timestamp)) {
-        id.timestamp = ts;
-        id.node_name = name;
-        id.sequence_number = sample->stats[i].sequence_number;
-      }
+    if (std::find(source_nodes.begin(), source_nodes.end(), name) == source_nodes.end()) {
+      continue;
+    }
+    source_identity_t candidate{
+      name, sample->stats[i].sequence_number, sample->stats[i].timestamp};
+    auto existing = roots.find(name);
+    if (existing == roots.end() || is_newer_source_identity(candidate, existing->second)) {
+      roots[name] = candidate;
     }
   }
-  return id;
+  std::vector<source_identity_t> result;
+  result.reserve(roots.size());
+  for (const auto & root : roots) {
+    result.push_back(root.second);
+  }
+  return result;
+}
+
+inline source_identity_t select_source_reference(
+  const std::vector<source_identity_t> & roots, bool use_minimum)
+{
+  if (roots.empty()) return {"", 0, 0};
+  const auto comparator = [](const source_identity_t & a, const source_identity_t & b) {
+      return source_reference_before(a, b);
+    };
+  const auto selected = use_minimum ?
+    std::min_element(roots.begin(), roots.end(), comparator) :
+    std::max_element(roots.begin(), roots.end(), comparator);
+  return *selected;
 }
 
 inline bool validate_hot_path_lineage(const std::map<std::string, node_map_t> & nodes)
 {
-  if (!has_node(nodes, "ObjectCollisionEstimator")) return false;
-  if (!has_node(nodes, "EuclideanClusterDetector")) return false;
-  if (!has_node(nodes, "RayGroundFilter")) return false;
-  if (!has_node(nodes, "PointCloudFusion")) return false;
-  bool has_front = has_node(nodes, "FrontLidarDriver");
-  bool has_rear = has_node(nodes, "RearLidarDriver");
+  const bool has_front = has_node(nodes, "FrontLidarDriver");
+  const bool has_rear = has_node(nodes, "RearLidarDriver");
   if (!has_front && !has_rear) return false;
-  if (has_front && !has_node(nodes, "PointsTransformerFront")) return false;
-  if (has_rear && !has_node(nodes, "PointsTransformerRear")) return false;
+  std::vector<std::string> expected{
+    "PointCloudFusion", "RayGroundFilter", "EuclideanClusterDetector",
+    "ObjectCollisionEstimator"};
+  if (has_front) {
+    expected.insert(expected.end(), {"FrontLidarDriver", "PointsTransformerFront"});
+  }
+  if (has_rear) {
+    expected.insert(expected.end(), {"RearLidarDriver", "PointsTransformerRear"});
+  }
+  if (!has_exact_nodes(nodes, expected)) return false;
   if (!ts_before(nodes, "RayGroundFilter", "EuclideanClusterDetector")) return false;
   if (!ts_before(nodes, "EuclideanClusterDetector", "ObjectCollisionEstimator")) return false;
   return true;
@@ -216,22 +267,16 @@ inline bool validate_hot_path_lineage(const std::map<std::string, node_map_t> & 
 
 inline bool validate_dbw_lineage(const std::map<std::string, node_map_t> & nodes)
 {
-  bool has_front = has_node(nodes, "FrontLidarDriver");
-  bool has_rear = has_node(nodes, "RearLidarDriver");
-  if (!has_front && !has_rear) return false;
-  if (has_front && !has_node(nodes, "PointsTransformerFront")) return false;
-  if (has_rear && !has_node(nodes, "PointsTransformerRear")) return false;
-  static const std::vector<std::string> required = {
-    "PointsTransformerFront", "PointsTransformerRear", "PointCloudFusion",
+  static const std::vector<std::string> expected = {
+    "FrontLidarDriver", "RearLidarDriver", "PointsTransformerFront",
+    "PointsTransformerRear", "PointCloudFusion",
     "VoxelGridDownsampler", "RayGroundFilter", "EuclideanClusterDetector",
     "ObjectCollisionEstimator", "PointCloudMap", "PointCloudMapLoader",
     "NDTLocalizer", "Visualizer", "Lanelet2GlobalPlanner", "Lanelet2Map",
     "Lanelet2MapLoader", "ParkingPlanner", "LanePlanner",
     "BehaviorPlanner", "MPCController", "VehicleInterface"
   };
-  for (const auto & req : required) {
-    if (!has_node(nodes, req)) return false;
-  }
+  if (!has_exact_nodes(nodes, expected)) return false;
   if (!ts_before(nodes, "PointCloudFusion", "VoxelGridDownsampler")) return false;
   if (!ts_before(nodes, "BehaviorPlanner", "MPCController")) return false;
   if (!ts_before(nodes, "MPCController", "VehicleInterface")) return false;
@@ -240,10 +285,9 @@ inline bool validate_dbw_lineage(const std::map<std::string, node_map_t> & nodes
 
 inline bool validate_intersection_lineage(const std::map<std::string, node_map_t> & nodes)
 {
-  if (!has_node(nodes, "EuclideanClusterSettings")) return false;
-  if (!has_node(nodes, "EuclideanClusterDetector")) return false;
-  if (has_node(nodes, "RayGroundFilter")) return false;
-  return true;
+  static const std::vector<std::string> expected = {
+    "EuclideanClusterSettings", "EuclideanClusterDetector"};
+  return has_exact_nodes(nodes, expected);
 }
 
 template<typename SampleTypePointer>
@@ -251,9 +295,59 @@ std::vector<std::string> extract_lineage(const SampleTypePointer & sample)
 {
   std::vector<std::string> lineage;
   for (uint64_t i = 0; i < sample->size; ++i) {
-    lineage.push_back(node_name_at(sample, i));
+    std::string name = node_name_at(sample, i);
+    if (std::find(lineage.begin(), lineage.end(), name) == lineage.end()) {
+      lineage.push_back(name);
+    }
   }
   return lineage;
+}
+
+inline std::string json_escape(const std::string & value)
+{
+  std::ostringstream escaped;
+  for (unsigned char c : value) {
+    switch (c) {
+      case '\\': escaped << "\\\\"; break;
+      case '"': escaped << "\\\""; break;
+      case '\b': escaped << "\\b"; break;
+      case '\f': escaped << "\\f"; break;
+      case '\n': escaped << "\\n"; break;
+      case '\r': escaped << "\\r"; break;
+      case '\t': escaped << "\\t"; break;
+      default:
+        if (c < 0x20U) {
+          static constexpr char hex[] = "0123456789abcdef";
+          escaped << "\\u00" << hex[c >> 4U] << hex[c & 0x0fU];
+        } else {
+          escaped << static_cast<char>(c);
+        }
+    }
+  }
+  return escaped.str();
+}
+
+inline std::vector<source_identity_t> normalized_source_roots(
+  const std::vector<source_identity_t> & roots, const source_identity_t & reference)
+{
+  std::map<std::string, source_identity_t> unique_roots;
+  for (const auto & root : roots) {
+    if (root.node_name.empty()) continue;
+    auto existing = unique_roots.find(root.node_name);
+    if (existing == unique_roots.end() || is_newer_source_identity(root, existing->second)) {
+      unique_roots[root.node_name] = root;
+    }
+  }
+  if (!reference.node_name.empty()) {
+    unique_roots[reference.node_name] = reference;
+  }
+
+  std::vector<source_identity_t> result;
+  result.reserve(unique_roots.size());
+  for (const auto & root : unique_roots) {
+    result.push_back(root.second);
+  }
+  return result;
 }
 
 inline std::string make_structured_chain_record(
@@ -266,26 +360,43 @@ inline std::string make_structured_chain_record(
   uint64_t sink_timestamp_ns,
   uint64_t latency_ns,
   const std::vector<std::string> & lineage,
+  const std::vector<source_identity_t> & contributing_source_roots,
   const std::string & status,
   uint32_t drop_count)
 {
+  const source_identity_t reference{source_node, source_sequence, source_timestamp_ns};
+  const auto roots = normalized_source_roots(contributing_source_roots, reference);
+  std::vector<std::string> unique_lineage;
+  for (const auto & name : lineage) {
+    if (std::find(unique_lineage.begin(), unique_lineage.end(), name) == unique_lineage.end()) {
+      unique_lineage.push_back(name);
+    }
+  }
   std::ostringstream oss;
-  oss << "{\"schema_version\":1";
-  oss << ",\"chain_id\":\"" << chain_id << "\"";
-  oss << ",\"source_node\":\"" << source_node << "\"";
+  oss << "{\"schema_version\":2,\"record_type\":\"completion\"";
+  oss << ",\"chain_id\":\"" << json_escape(chain_id) << "\"";
+  oss << ",\"source_node\":\"" << json_escape(source_node) << "\"";
   oss << ",\"source_sequence\":" << source_sequence;
   oss << ",\"source_timestamp_ns\":" << source_timestamp_ns;
-  oss << ",\"sink_node\":\"" << sink_node << "\"";
+  oss << ",\"contributing_source_roots\":[";
+  for (size_t i = 0U; i < roots.size(); ++i) {
+    if (i > 0U) oss << ",";
+    oss << "{\"source_node\":\"" << json_escape(roots[i].node_name) << "\"";
+    oss << ",\"source_sequence\":" << roots[i].sequence_number;
+    oss << ",\"source_timestamp_ns\":" << roots[i].timestamp << "}";
+  }
+  oss << "]";
+  oss << ",\"sink_node\":\"" << json_escape(sink_node) << "\"";
   oss << ",\"sink_sequence\":" << sink_sequence;
   oss << ",\"sink_timestamp_ns\":" << sink_timestamp_ns;
   oss << ",\"latency_ns\":" << latency_ns;
   oss << ",\"lineage\":[";
-  for (size_t i = 0U; i < lineage.size(); ++i) {
+  for (size_t i = 0U; i < unique_lineage.size(); ++i) {
     if (i > 0U) oss << ",";
-    oss << "\"" << lineage[i] << "\"";
+    oss << "\"" << json_escape(unique_lineage[i]) << "\"";
   }
   oss << "]";
-  oss << ",\"status\":\"" << status << "\"";
+  oss << ",\"status\":\"" << json_escape(status) << "\"";
   oss << ",\"drop_count\":" << drop_count;
   oss << ",\"instrumentation_error_count\":" << structured_record_error_count().load();
   oss << ",\"metadata_overflow_count\":" << metadata_overflow_count().load();
@@ -318,26 +429,44 @@ inline bool emit_structured_chain_record(
   uint64_t sink_timestamp_ns,
   uint64_t latency_ns,
   const std::vector<std::string> & lineage,
+  const std::vector<source_identity_t> & contributing_source_roots,
   const std::string & status,
   uint32_t drop_count)
 {
   return write_structured_record(make_structured_chain_record(
       chain_id, source_node, source_sequence, source_timestamp_ns,
       sink_node, sink_sequence, sink_timestamp_ns, latency_ns,
-      lineage, status, drop_count));
+      lineage, contributing_source_roots, status, drop_count));
+}
+
+inline std::string make_structured_source_record(
+  const std::string & source_node, uint32_t source_sequence, uint64_t source_timestamp_ns)
+{
+  std::ostringstream oss;
+  oss << "{\"schema_version\":2,\"record_type\":\"source\"";
+  oss << ",\"source_node\":\"" << json_escape(source_node) << "\"";
+  oss << ",\"source_sequence\":" << source_sequence;
+  oss << ",\"source_timestamp_ns\":" << source_timestamp_ns;
+  oss << ",\"instrumentation_error_count\":" << structured_record_error_count().load();
+  oss << ",\"metadata_overflow_count\":" << metadata_overflow_count().load() << "}\n";
+  return oss.str();
 }
 
 inline bool emit_structured_source_record(
   const std::string & source_node, uint32_t source_sequence, uint64_t source_timestamp_ns)
 {
-  std::ostringstream oss;
-  oss << "{\"schema_version\":1,\"record_type\":\"source\"";
-  oss << ",\"source_node\":\"" << source_node << "\"";
-  oss << ",\"source_sequence\":" << source_sequence;
-  oss << ",\"source_timestamp_ns\":" << source_timestamp_ns;
-  oss << ",\"instrumentation_error_count\":" << structured_record_error_count().load();
-  oss << ",\"metadata_overflow_count\":" << metadata_overflow_count().load() << "}\n";
-  return write_structured_record(oss.str());
+  return write_structured_record(
+    make_structured_source_record(source_node, source_sequence, source_timestamp_ns));
+}
+
+inline bool is_newer_node_snapshot(
+  uint32_t sequence_number, uint64_t timestamp, uint32_t dropped_samples,
+  const reference_interfaces::msg::TransmissionStats & current)
+{
+  return sequence_number > current.sequence_number ||
+         (sequence_number == current.sequence_number &&
+         (timestamp > current.timestamp ||
+         (timestamp == current.timestamp && dropped_samples > current.dropped_samples)));
 }
 
 template<typename SampleTypePointer>
@@ -347,6 +476,19 @@ void set_sample(
 {
   if (is_in_benchmark_mode() ) {return;}
 
+  for (uint64_t i = 0; i < sample.size; ++i) {
+    if (node_name_at(&sample, i) != node_name) continue;
+    if (!is_newer_node_snapshot(
+        sequence_number, timestamp, dropped_samples, sample.stats[i]))
+    {
+      return;
+    }
+    sample.stats[i].timestamp = timestamp;
+    sample.stats[i].sequence_number = sequence_number;
+    sample.stats[i].dropped_samples = dropped_samples;
+    return;
+  }
+
   if (sample.size >= message_t::STATS_CAPACITY) {
     ++metadata_overflow_count();
     return;
@@ -355,11 +497,12 @@ void set_sample(
   uint64_t idx = sample.size;
   ++sample.size;
 
+  std::fill(sample.stats[idx].node_name.begin(), sample.stats[idx].node_name.end(), '\0');
   memcpy(
     sample.stats[idx].node_name.data(), node_name.data(),
     std::min(
       node_name.size(),
-      reference_interfaces::msg::TransmissionStats::NODE_NAME_LENGTH));
+      reference_interfaces::msg::TransmissionStats::NODE_NAME_LENGTH - 1U));
 
   sample.stats[idx].timestamp = timestamp;
 
@@ -404,35 +547,60 @@ void merge_history_into_sample(SampleTypePointer & sample, const SourceType & so
 {
   if (is_in_benchmark_mode()) {return;}
 
-  std::vector<uint64_t> entries_to_add;
-
-  for (uint64_t i = 0; i < source->size; ++i) {
-    bool entry_found = false;
-    std::string source_name((const char *)source->stats[i].node_name.data());
-    uint32_t source_seq = source->stats[i].sequence_number;
-
-    for (uint64_t k = 0; k < sample.size; ++k) {
-      std::string sample_name((const char *)sample.stats[k].node_name.data());
-      if (source_name == sample_name &&
-          source_seq == sample.stats[k].sequence_number)
-      {
-        entry_found = true;
+  uint64_t unique_size = 0;
+  for (uint64_t i = 0; i < sample.size; ++i) {
+    const std::string name = node_name_at(&sample, i);
+    uint64_t existing = unique_size;
+    for (uint64_t k = 0; k < unique_size; ++k) {
+      if (node_name_at(&sample, k) == name) {
+        existing = k;
         break;
       }
     }
-
-    if (!entry_found) {entries_to_add.emplace_back(i);}
-  }
-
-  for (auto i : entries_to_add) {
-    if (sample.size >= message_t::STATS_CAPACITY) {
-      ++metadata_overflow_count();
-      break;
+    if (existing == unique_size) {
+      if (unique_size != i) {
+        memcpy(
+          sample.stats.data() + unique_size, sample.stats.data() + i,
+          sizeof(reference_interfaces::msg::TransmissionStats));
+      }
+      ++unique_size;
+    } else if (is_newer_node_snapshot(
+        sample.stats[i].sequence_number, sample.stats[i].timestamp,
+        sample.stats[i].dropped_samples, sample.stats[existing]))
+    {
+      memcpy(
+        sample.stats.data() + existing, sample.stats.data() + i,
+        sizeof(reference_interfaces::msg::TransmissionStats));
     }
-    memcpy(
-      sample.stats.data() + sample.size, source->stats.data() + i,
-      sizeof(reference_interfaces::msg::TransmissionStats));
-    ++sample.size;
+  }
+  sample.size = unique_size;
+
+  for (uint64_t i = 0; i < source->size; ++i) {
+    const std::string source_name = node_name_at(source, i);
+    uint64_t existing = sample.size;
+    for (uint64_t k = 0; k < sample.size; ++k) {
+      if (node_name_at(&sample, k) == source_name) {
+        existing = k;
+        break;
+      }
+    }
+    if (existing == sample.size) {
+      if (sample.size >= message_t::STATS_CAPACITY) {
+        ++metadata_overflow_count();
+        return;
+      }
+      memcpy(
+        sample.stats.data() + sample.size, source->stats.data() + i,
+        sizeof(reference_interfaces::msg::TransmissionStats));
+      ++sample.size;
+    } else if (is_newer_node_snapshot(
+        source->stats[i].sequence_number, source->stats[i].timestamp,
+        source->stats[i].dropped_samples, sample.stats[existing]))
+    {
+      memcpy(
+        sample.stats.data() + existing, source->stats.data() + i,
+        sizeof(reference_interfaces::msg::TransmissionStats));
+    }
   }
 }
 
@@ -547,7 +715,7 @@ void print_sample_path(
   }
 
   for (uint64_t i = 0; i < sample->size; ++i) {
-    std::string name((const char *)sample->stats[i].node_name.data());
+    std::string name = node_name_at(sample, i);
     std::cout << "  [";
     std::cout.width(2);
     std::cout << timestamp2Order[sample->stats[i].timestamp];
@@ -583,8 +751,7 @@ void print_sample_path(
   uint64_t lidar_timestamp = 0;
   for (uint64_t i = 0; i < sample->size; ++i) {
     uint64_t idx = sample->size - i - 1;
-    std::string current_node_name(
-      reinterpret_cast<const char *>(sample->stats[idx].node_name.data()));
+    std::string current_node_name = node_name_at(sample, idx);
 
     if (current_node_name == "ObjectCollisionEstimator") {
       hot_path_latency_in_ns = sample->stats[idx].timestamp;
@@ -602,8 +769,7 @@ void print_sample_path(
   if (does_contain_hot_path) {
     for (uint64_t i = 0; i < sample->size; ++i) {
       uint64_t idx = sample->size - i - 1;
-      std::string current_node_name(
-        reinterpret_cast<const char *>(sample->stats[idx].node_name.data()));
+      std::string current_node_name = node_name_at(sample, idx);
       if (current_node_name == "ObjectCollisionEstimator" ||
         current_node_name == "FrontLidarDriver" ||
         current_node_name == "PointsTransformerFront" ||
@@ -619,8 +785,7 @@ void print_sample_path(
   // behavior planner cycle time
   bool does_contain_behavior_planner = false;
   for (uint64_t i = 0; i < sample->size; ++i) {
-    std::string current_node_name(
-      reinterpret_cast<const char *>(sample->stats[i].node_name.data()));
+    std::string current_node_name = node_name_at(sample, i);
     if (current_node_name == "BehaviorPlanner") {
       does_contain_behavior_planner = true;
       auto seq_nr = sample->stats[i].sequence_number;

@@ -70,7 +70,10 @@ private:
     if (is_structured_output_enabled() && node_name == "ObjectCollisionEstimator") {
       auto nodes = build_node_map(&output_message.get());
       if (validate_hot_path_lineage(nodes)) {
-        auto src_id = extract_source_identity(&output_message.get(), false);
+        static const std::vector<std::string> lidar_sources{
+          "FrontLidarDriver", "RearLidarDriver"};
+        const auto roots = extract_source_roots(&output_message.get(), lidar_sources);
+        auto src_id = select_source_reference(roots, false);
         if (!src_id.node_name.empty()) {
           uint64_t latency;
           if (elapsed_ns(src_id.timestamp, sink_timestamp, latency)) {
@@ -80,7 +83,7 @@ private:
               "perception_collision_hot_path",
               src_id.node_name, src_id.sequence_number, src_id.timestamp,
               node_name, sequence_number_ - 1, sink_timestamp,
-              latency, lineage, deadline_status(latency, 500000000ULL), drops);
+              latency, lineage, roots, deadline_status(latency, 500000000ULL), drops);
           }
         }
       }

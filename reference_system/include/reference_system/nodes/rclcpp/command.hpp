@@ -59,7 +59,10 @@ private:
       lineage.push_back(node_name);
 
       if (node_name == "VehicleDBWSystem" && validate_dbw_lineage(nodes)) {
-        auto src_id = extract_source_identity(input_message, true);
+        static const std::vector<std::string> lidar_sources{
+          "FrontLidarDriver", "RearLidarDriver"};
+        const auto roots = extract_source_roots(input_message, lidar_sources);
+        auto src_id = select_source_reference(roots, true);
         if (!src_id.node_name.empty()) {
           uint64_t latency;
           if (elapsed_ns(src_id.timestamp, sink_timestamp, latency)) {
@@ -68,7 +71,7 @@ private:
               "perception_localization_planning_control_to_dbw",
               src_id.node_name, src_id.sequence_number, src_id.timestamp,
               node_name, sink_sequence, sink_timestamp,
-              latency, lineage, deadline_status(latency, 1000000000ULL), drops);
+              latency, lineage, roots, deadline_status(latency, 1000000000ULL), drops);
           }
         }
       } else if (node_name == "IntersectionOutput" && validate_intersection_lineage(nodes)) {
@@ -78,11 +81,13 @@ private:
           uint64_t latency;
           if (elapsed_ns(src_ts, sink_timestamp, latency)) {
             uint32_t drops = sum_drops(input_message, nodes) + missed_samples;
+            const std::vector<source_identity_t> roots{{
+                "EuclideanClusterSettings", it->second.sequence_number, src_ts}};
             emit_structured_chain_record(
               "euclidean_settings_to_intersection_output",
               "EuclideanClusterSettings", it->second.sequence_number, src_ts,
               node_name, sink_sequence, sink_timestamp,
-              latency, lineage, deadline_status(latency, 250000000ULL), drops);
+              latency, lineage, roots, deadline_status(latency, 250000000ULL), drops);
           }
         }
       }

@@ -124,6 +124,7 @@ private:
           this->get_name(), sequence_number_ - 1, timestamp,
           this->get_name(), sequence_number_ - 1, sink_timestamp,
           period_ns, lineage,
+          std::vector<source_identity_t>{{this->get_name(), sequence_number_ - 1, timestamp}},
           violated ? "violated" : "completed", 0);
       }
     }
