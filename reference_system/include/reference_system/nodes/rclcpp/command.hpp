@@ -68,7 +68,7 @@ private:
               "perception_localization_planning_control_to_dbw",
               src_id.node_name, src_id.sequence_number, src_id.timestamp,
               node_name, sink_sequence, sink_timestamp,
-              latency, lineage, "completed", drops);
+              latency, lineage, deadline_status(latency, 1000000000ULL), drops);
           }
         }
       } else if (node_name == "IntersectionOutput" && validate_intersection_lineage(nodes)) {
@@ -82,7 +82,7 @@ private:
               "euclidean_settings_to_intersection_output",
               "EuclideanClusterSettings", it->second.sequence_number, src_ts,
               node_name, sink_sequence, sink_timestamp,
-              latency, lineage, "completed", drops);
+              latency, lineage, deadline_status(latency, 250000000ULL), drops);
           }
         }
       }

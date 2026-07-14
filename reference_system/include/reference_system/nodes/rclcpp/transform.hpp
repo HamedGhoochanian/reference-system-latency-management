@@ -80,7 +80,7 @@ private:
               "perception_collision_hot_path",
               src_id.node_name, src_id.sequence_number, src_id.timestamp,
               node_name, sequence_number_ - 1, sink_timestamp,
-              latency, lineage, "completed", drops);
+              latency, lineage, deadline_status(latency, 500000000ULL), drops);
           }
         }
       }

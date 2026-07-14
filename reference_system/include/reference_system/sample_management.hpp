@@ -112,6 +112,11 @@ inline bool elapsed_ns(uint64_t start, uint64_t end, uint64_t & elapsed)
   return true;
 }
 
+inline const char * deadline_status(uint64_t latency_ns, uint64_t deadline_ns)
+{
+  return latency_ns > deadline_ns ? "violated" : "completed";
+}
+
 template<typename SampleTypePointer>
 std::string node_name_at(const SampleTypePointer & sample, uint64_t idx)
 {

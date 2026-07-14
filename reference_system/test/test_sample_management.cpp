@@ -22,6 +22,21 @@ TEST(SampleManagement, RejectsBackwardTimestamps)
   EXPECT_EQ(10U, elapsed);
 }
 
+TEST(SampleManagement, DeadlineStatusUsesStrictBoundary)
+{
+  EXPECT_STREQ("completed", deadline_status(499999999U, 500000000U));
+  EXPECT_STREQ("completed", deadline_status(500000000U, 500000000U));
+  EXPECT_STREQ("violated", deadline_status(500000001U, 500000000U));
+
+  EXPECT_STREQ("completed", deadline_status(999999999U, 1000000000U));
+  EXPECT_STREQ("completed", deadline_status(1000000000U, 1000000000U));
+  EXPECT_STREQ("violated", deadline_status(1000000001U, 1000000000U));
+
+  EXPECT_STREQ("completed", deadline_status(249999999U, 250000000U));
+  EXPECT_STREQ("completed", deadline_status(250000000U, 250000000U));
+  EXPECT_STREQ("violated", deadline_status(250000001U, 250000000U));
+}
+
 TEST(SampleManagement, SerializesOneCompleteJsonLine)
 {
   auto record = make_structured_chain_record(
