@@ -97,6 +97,10 @@ endif()
 if(${BUILD_TESTING})
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_autoware_system_builder test/test_autoware_reference_system.cpp)
+  target_include_directories(test_autoware_system_builder PRIVATE include)
+  ament_target_dependencies(test_autoware_system_builder reference_interfaces reference_system rclcpp)
 
   # tracetools uses ROS_HOME to place tracing data
   if(NOT DEFINED $ENV{ROS_HOME})
