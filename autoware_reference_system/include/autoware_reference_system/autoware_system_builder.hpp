@@ -30,13 +30,19 @@ using CallbackPriority = callback::priority::Default;
 #endif
 
 template<typename SystemType, typename TimingConfig>
-auto create_autoware_nodes(const std::vector<std::string> & selected_node_names = {})
+auto create_autoware_nodes(
+  const std::vector<std::string> & selected_node_names = {},
+  const double input_period_scale = 1.0)
 ->std::vector<std::shared_ptr<typename SystemType::NodeBaseType>>
 {
   std::vector<std::shared_ptr<typename SystemType::NodeBaseType>> nodes;
   const auto is_selected = [&selected_node_names](const char * node_name) {
     return selected_node_names.empty() || std::find(
       selected_node_names.begin(), selected_node_names.end(), node_name) != selected_node_names.end();
+  };
+  const auto input_period = [input_period_scale](const auto period) {
+    return std::chrono::nanoseconds{
+      static_cast<std::chrono::nanoseconds::rep>(period.count() * input_period_scale)};
   };
 
 // ignore the warning about designated initializers - they make the code much
@@ -51,7 +57,7 @@ auto create_autoware_nodes(const std::vector<std::string> & selected_node_names 
       std::make_shared<typename SystemType::Sensor>(
         nodes::SensorSettings{.node_name = "FrontLidarDriver",
           .topic_name = "FrontLidarDriver",
-          .cycle_time = TimingConfig::FRONT_LIDAR_DRIVER,
+          .cycle_time = input_period(TimingConfig::FRONT_LIDAR_DRIVER),
           #ifdef PICAS
           .callback_priority = CallbackPriority::FRONT_LIDAR_DRIVER_CALLBACK
           #endif
@@ -63,7 +69,7 @@ auto create_autoware_nodes(const std::vector<std::string> & selected_node_names 
       std::make_shared<typename SystemType::Sensor>(
         nodes::SensorSettings{.node_name = "RearLidarDriver",
           .topic_name = "RearLidarDriver",
-          .cycle_time = TimingConfig::REAR_LIDAR_DRIVER,
+          .cycle_time = input_period(TimingConfig::REAR_LIDAR_DRIVER),
           #ifdef PICAS
           .callback_priority = CallbackPriority::REAR_LIDAR_DRIVER_CALLBACK
           #endif
@@ -75,7 +81,7 @@ auto create_autoware_nodes(const std::vector<std::string> & selected_node_names 
       std::make_shared<typename SystemType::Sensor>(
         nodes::SensorSettings{.node_name = "PointCloudMap",
           .topic_name = "PointCloudMap",
-          .cycle_time = TimingConfig::POINT_CLOUD_MAP,
+          .cycle_time = input_period(TimingConfig::POINT_CLOUD_MAP),
           #ifdef PICAS
           .callback_priority = CallbackPriority::POINT_CLOUD_MAP_CALLBACK
           #endif
@@ -87,7 +93,7 @@ auto create_autoware_nodes(const std::vector<std::string> & selected_node_names 
       std::make_shared<typename SystemType::Sensor>(
         nodes::SensorSettings{.node_name = "Visualizer",
           .topic_name = "Visualizer",
-          .cycle_time = TimingConfig::VISUALIZER,
+          .cycle_time = input_period(TimingConfig::VISUALIZER),
           #ifdef PICAS
           .callback_priority = CallbackPriority::VISUALIZER_CALLBACK
           #endif
@@ -99,7 +105,7 @@ auto create_autoware_nodes(const std::vector<std::string> & selected_node_names 
       std::make_shared<typename SystemType::Sensor>(
         nodes::SensorSettings{.node_name = "Lanelet2Map",
           .topic_name = "Lanelet2Map",
-          .cycle_time = TimingConfig::LANELET2MAP,
+          .cycle_time = input_period(TimingConfig::LANELET2MAP),
           #ifdef PICAS
           .callback_priority = CallbackPriority::LANELET_2_MAP_CALLBACK
           #endif
@@ -111,7 +117,7 @@ auto create_autoware_nodes(const std::vector<std::string> & selected_node_names 
       std::make_shared<typename SystemType::Sensor>(
         nodes::SensorSettings{.node_name = "EuclideanClusterSettings",
           .topic_name = "EuclideanClusterSettings",
-          .cycle_time = TimingConfig::EUCLIDEAN_CLUSTER_SETTINGS,
+          .cycle_time = input_period(TimingConfig::EUCLIDEAN_CLUSTER_SETTINGS),
           #ifdef PICAS
           .callback_priority = CallbackPriority::EUCLIDEAN_CLUSTER_SETTINGS_CALLBACK
           #endif

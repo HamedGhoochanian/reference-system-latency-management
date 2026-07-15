@@ -13,6 +13,7 @@
 // limitations under the License.
 
 // Regression test: selected nodes must not be constructed then erased.
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -29,12 +30,17 @@ struct TestNode
   explicit TestNode(const nodes::CyclicSettings & settings) { record(settings.node_name); }
   explicit TestNode(const nodes::FusionSettings & settings) { record(settings.node_name); }
   explicit TestNode(const nodes::IntersectionSettings & settings) { record(settings.node_name); }
-  explicit TestNode(const nodes::SensorSettings & settings) { record(settings.node_name); }
+  explicit TestNode(const nodes::SensorSettings & settings)
+  {
+    record(settings.node_name);
+    sensor_period = settings.cycle_time;
+  }
   explicit TestNode(const nodes::TransformSettings & settings) { record(settings.node_name); }
 
   const std::string & get_name() const { return name; }
 
   static std::vector<std::string> constructed_names;
+  std::chrono::nanoseconds sensor_period{0};
 
 private:
   void record(const std::string & node_name)
@@ -94,5 +100,14 @@ TEST_F(AutowareSystemBuilderTest, SingleSelectionConstructsOnlyThatNode)
   ASSERT_EQ(built_nodes.size(), 1U);
   EXPECT_EQ(built_nodes.front()->get_name(), "IntersectionOutput");
   EXPECT_EQ(TestNode::constructed_names, std::vector<std::string>{"IntersectionOutput"});
+}
+
+TEST_F(AutowareSystemBuilderTest, InputPeriodScaleChangesSensorPeriod)
+{
+  const auto built_nodes = create_autoware_nodes<TestSystem, nodes::timing::Default>(
+    {"FrontLidarDriver"}, 0.5);
+
+  ASSERT_EQ(built_nodes.size(), 1U);
+  EXPECT_EQ(built_nodes.front()->sensor_period, std::chrono::milliseconds{50});
 }
 }  // namespace
