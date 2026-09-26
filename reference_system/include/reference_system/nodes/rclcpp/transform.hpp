@@ -13,11 +13,16 @@
 // limitations under the License.
 #ifndef REFERENCE_SYSTEM__NODES__RCLCPP__TRANSFORM_HPP_
 #define REFERENCE_SYSTEM__NODES__RCLCPP__TRANSFORM_HPP_
+#include <sys/time.h>
+
 #include <chrono>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <optional>
 #include <string>
 #include <utility>
-#include <iostream>
-#include <sys/time.h>
+#include <vector>
 #include "rclcpp/rclcpp.hpp"
 #include "reference_system/nodes/settings.hpp"
 #include "reference_system/number_cruncher.hpp"
@@ -34,8 +39,14 @@ class Transform : public rclcpp::Node
 public:
   explicit Transform(const TransformSettings & settings)
   : Node(settings.node_name),
-    number_crunch_limit_(settings.number_crunch_limit)
+    number_crunch_limit_(settings.number_crunch_limit),
+    chain_id_(settings.chain_id),
+    source_candidate_names_(settings.source_candidate_names),
+    configured_source_name_(settings.configured_source_name)
   {
+    if (!chain_id_.empty()) {
+      event_logger_ = reference_system::events::make_component_event_logger(settings.node_name);
+    }
     subscription_ = this->create_subscription<message_t>(
       settings.input_topic, 1,
       [this](const message_t::SharedPtr msg) {input_callback(msg);});
@@ -60,33 +71,21 @@ private:
       input_message,
       input_sequence_number_);
 
-    set_sample(
-      this->get_name(), sequence_number_++, missed_samples, timestamp,
-      output_message.get());
-
-    uint64_t sink_timestamp = now_as_int();
+    const uint32_t sink_sequence = sequence_number_++;
+    set_sample(this->get_name(), sink_sequence, missed_samples, timestamp, output_message.get());
 
     std::string node_name = this->get_name();
-    if (is_structured_output_enabled() && node_name == "ObjectCollisionEstimator") {
-      auto nodes = build_node_map(&output_message.get());
-      if (validate_hot_path_lineage(nodes)) {
-        static const std::vector<std::string> lidar_sources{
-          "FrontLidarDriver", "RearLidarDriver"};
-        const auto roots = extract_source_roots(&output_message.get(), lidar_sources);
-        auto src_id = select_source_reference(roots, false);
-        if (!src_id.node_name.empty()) {
-          uint64_t latency;
-          if (elapsed_ns(src_id.timestamp, sink_timestamp, latency)) {
-            uint32_t drops = sum_drops(&output_message.get(), nodes);
-            std::vector<std::string> lineage = extract_lineage(&output_message.get());
-            emit_structured_chain_record(
-              "perception_collision_hot_path",
-              src_id.node_name, src_id.sequence_number, src_id.timestamp,
-              node_name, sequence_number_ - 1, sink_timestamp,
-              latency, lineage, roots, deadline_status(latency, 500000000ULL), drops);
-          }
-        }
-      }
+    std::map<std::string, node_map_t> nodes;
+    std::vector<source_identity_t> roots;
+    std::vector<std::string> lineage;
+    std::optional<source_identity_t> configured_source;
+    bool chain_lineage_valid = false;
+    if (!chain_id_.empty()) {
+      nodes = build_node_map(&output_message.get());
+      roots = find_source_identities(nodes, source_candidate_names_);
+      lineage = extract_lineage(&output_message.get());
+      configured_source = find_source_identity(nodes, configured_source_name_);
+      chain_lineage_valid = validate_hot_path_lineage(nodes);
     }
 
     // use result so that it is not optimizied away by some clever compiler
@@ -96,12 +95,50 @@ private:
     print_execution_time(
       "Transform", this->get_name(),
       (c2.tv_sec - c1.tv_sec) * 1000000 + (c2.tv_usec - c1.tv_usec));
+
+    if (!chain_id_.empty()) {
+      const uint64_t legacy_sink_timestamp = now_as_int();
+      if (is_structured_output_enabled() && configured_source && chain_lineage_valid)
+      {
+        uint64_t latency = 0;
+        if (elapsed_ns(configured_source->timestamp, legacy_sink_timestamp, latency)) {
+          const uint32_t drops = sum_drops(input_message, nodes);
+          emit_structured_chain_record(
+            chain_id_,
+            configured_source->node_name, configured_source->sequence_number,
+            configured_source->timestamp,
+            node_name, sink_sequence, legacy_sink_timestamp,
+            latency, lineage, roots, deadline_status(latency, 500000000ULL), drops);
+        }
+      }
+
+      if (event_logger_) {
+        const std::optional<reference_system::events::SourceExecutionId> source_id =
+          configured_source && chain_lineage_valid ?
+          std::optional<reference_system::events::SourceExecutionId>{
+            to_event_source_id(*configured_source)} : std::nullopt;
+        const std::string lineage_error = !configured_source ?
+          "configured_source_missing:" + configured_source_name_ :
+          !chain_lineage_valid ? "chain_lineage_invalid" : "";
+        event_logger_->sink_finish(
+          chain_id_,
+          source_id,
+          sink_sequence,
+          to_event_source_ids(roots),
+          event_lineage(nodes),
+          lineage_error);
+      }
+    }
   }
 
 private:
   rclcpp::Publisher<message_t>::SharedPtr publisher_;
   rclcpp::Subscription<message_t>::SharedPtr subscription_;
   uint64_t number_crunch_limit_;
+  std::string chain_id_;
+  std::vector<std::string> source_candidate_names_;
+  std::string configured_source_name_;
+  std::unique_ptr<reference_system::events::ComponentEventLogger> event_logger_;
   uint32_t sequence_number_ = 0;
   uint32_t input_sequence_number_ = 0;
 };

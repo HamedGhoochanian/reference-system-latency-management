@@ -13,11 +13,14 @@
 // limitations under the License.
 #ifndef REFERENCE_SYSTEM__NODES__RCLCPP__SENSOR_HPP_
 #define REFERENCE_SYSTEM__NODES__RCLCPP__SENSOR_HPP_
+#include <sys/time.h>
+
 #include <chrono>
+#include <iostream>
+#include <memory>
 #include <string>
 #include <utility>
-#include <iostream>
-#include <sys/time.h>
+#include <vector>
 #include "rclcpp/rclcpp.hpp"
 #include "reference_system/nodes/settings.hpp"
 #include "reference_system/sample_management.hpp"
@@ -32,8 +35,10 @@ class Sensor : public rclcpp::Node
 {
 public:
   explicit Sensor(const SensorSettings & settings)
-  : Node(settings.node_name)
+  : Node(settings.node_name),
+    chain_ids_(settings.chain_ids)
   {
+    event_logger_ = reference_system::events::make_component_event_logger(settings.node_name);
     publisher_ = this->create_publisher<message_t>(settings.topic_name, 1);
     timer_ = this->create_wall_timer(
       settings.cycle_time,
@@ -47,12 +52,15 @@ private:
   struct timeval c1, c2;
   void timer_callback()
   {
-    gettimeofday(&c1, NULL);
+    const uint32_t sequence = sequence_number_++;
     uint64_t timestamp = now_as_int();
+    if (event_logger_) {
+      timestamp = event_logger_->source_entry(sequence, chain_ids_).timestamp_ns;
+    }
+    gettimeofday(&c1, NULL);
     auto message = publisher_->borrow_loaned_message();
     message.get().size = 0;
 
-    uint32_t sequence = sequence_number_++;
     set_sample(this->get_name(), sequence, 0, timestamp, message.get());
 
     publisher_->publish(std::move(message));
@@ -73,6 +81,8 @@ private:
 private:
   rclcpp::Publisher<message_t>::SharedPtr publisher_;
   rclcpp::TimerBase::SharedPtr timer_;
+  std::vector<std::string> chain_ids_;
+  std::unique_ptr<reference_system::events::ComponentEventLogger> event_logger_;
   uint32_t sequence_number_ = 0;
 };
 }  // namespace rclcpp_system
