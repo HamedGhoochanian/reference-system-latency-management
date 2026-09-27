@@ -445,6 +445,87 @@ TEST(EventLogging, UnconfiguredDBWSinkIsNotGivenASourceMatch)
   std::filesystem::remove_all(directory);
 }
 
+TEST(EventLogging, CachedInputsKeepDistinctSourceExecutionsAfterMetadataMerge)
+{
+  message_t older{};
+  message_t newer{};
+  message_t merged{};
+  set_sample("FrontLidarDriver", 7U, 0U, 100U, older);
+  set_sample("FrontLidarDriver", 8U, 0U, 200U, newer);
+  const auto older_input = event_input_lineage(&older);
+  const auto newer_input = event_input_lineage(&newer);
+  merge_history_into_sample(merged, &older);
+  merge_history_into_sample(merged, &newer);
+  ASSERT_EQ(1U, merged.size);
+  EXPECT_EQ(8U, merged.stats[0].sequence_number);
+
+  const auto directory = temporary_event_directory();
+  {
+    reference_system::events::ComponentEventLogger planner(
+      "BehaviorPlanner", directory.string(), "run-provenance");
+    const auto first = planner.input_entry(0U, 0U, older_input);
+    const auto second = planner.input_entry(1U, 1U, newer_input);
+    const auto timer = planner.callback_entry(4U);
+    planner.output_dependencies(4U, timer.timestamp_ns,
+      {{0U, {"BehaviorPlanner", 0U, first.timestamp_ns}},
+        {1U, {"BehaviorPlanner", 1U, second.timestamp_ns}}},
+      reference_system::events::SourceExecutionId{
+        "BehaviorPlanner", 4U, timer.timestamp_ns});
+  }
+  {
+    reference_system::events::ComponentEventLogger dbw(
+      "VehicleDBWSystem", directory.string(), "run-provenance");
+    dbw.sink_finish(
+      "perception_localization_planning_control_to_dbw", std::nullopt, 2U,
+      {{"FrontLidarDriver", 8U, 200U}}, event_input_lineage(&merged),
+      "chain_source_unconfigured_ambiguous", "unconfigured", event_input_lineage(&merged));
+  }
+
+  const auto planner_lines = read_lines(directory / "BehaviorPlanner.jsonl");
+  ASSERT_EQ(6U, planner_lines.size());
+  EXPECT_NE(std::string::npos, planner_lines[1].find("\"sequence\":7,\"timestamp_ns\":100"));
+  EXPECT_NE(std::string::npos, planner_lines[2].find("\"sequence\":8,\"timestamp_ns\":200"));
+  EXPECT_NE(std::string::npos, planner_lines[4].find("\"record_type\":\"output_dependencies\""));
+  EXPECT_NE(std::string::npos, planner_lines[4].find("\"input_index\":0"));
+  EXPECT_NE(std::string::npos, planner_lines[4].find("\"input_index\":1"));
+  EXPECT_NE(std::string::npos, planner_lines[4].find("\"timer_callback_execution_id\":{\"component\":\"BehaviorPlanner\""));
+  const auto dbw_lines = read_lines(directory / "VehicleDBWSystem.jsonl");
+  ASSERT_EQ(3U, dbw_lines.size());
+  EXPECT_NE(std::string::npos, dbw_lines[1].find("\"source_execution_id\":null"));
+  EXPECT_NE(std::string::npos, dbw_lines[1].find("chain_source_unconfigured_ambiguous"));
+  EXPECT_NE(std::string::npos, dbw_lines[1].find("\"lineage_complete\":false"));
+  std::filesystem::remove_all(directory);
+}
+
+TEST(EventLogging, FusionOutputLinksTriggerAndReusedCachedInput)
+{
+  const auto directory = temporary_event_directory();
+  {
+    reference_system::events::ComponentEventLogger fusion(
+      "VehicleInterface", directory.string(), "run-fusion");
+    const auto cached = fusion.input_entry(0U, 1U, {{"BehaviorPlanner", 3U, 300U}});
+    const auto trigger1 = fusion.input_entry(1U, 0U, {{"MPCController", 5U, 500U}});
+    fusion.output_dependencies(0U, trigger1.timestamp_ns,
+      {{0U, {"VehicleInterface", 1U, trigger1.timestamp_ns}},
+        {1U, {"VehicleInterface", 0U, cached.timestamp_ns}}});
+    const auto trigger2 = fusion.input_entry(2U, 0U, {{"MPCController", 6U, 600U}});
+    fusion.output_dependencies(1U, trigger2.timestamp_ns,
+      {{0U, {"VehicleInterface", 2U, trigger2.timestamp_ns}},
+        {1U, {"VehicleInterface", 0U, cached.timestamp_ns}}});
+  }
+  const auto lines = read_lines(directory / "VehicleInterface.jsonl");
+  ASSERT_EQ(7U, lines.size());
+  EXPECT_NE(std::string::npos, lines[1].find("\"input_index\":1"));
+  EXPECT_NE(std::string::npos, lines[2].find("\"input_index\":0"));
+  EXPECT_NE(std::string::npos, lines[2].find("\"sequence\":5,\"timestamp_ns\":500"));
+  EXPECT_NE(std::string::npos, lines[4].find("\"sequence\":6,\"timestamp_ns\":600"));
+  const auto cached_id = "\"callback_execution_id\":{\"component\":\"VehicleInterface\",\"sequence\":0,\"timestamp_ns\":" +
+    std::to_string(json_integer(lines[1], "timestamp_ns"));
+  EXPECT_NE(std::string::npos, lines[3].find(cached_id));
+  EXPECT_NE(std::string::npos, lines[5].find(cached_id));
+  std::filesystem::remove_all(directory);
+}
+
 TEST(EventLogging, QueueOverflowWritesErrorAndStopsProgress)
 {
   const auto directory = temporary_event_directory();

@@ -218,6 +218,19 @@ inline std::vector<reference_system::events::SourceExecutionId> event_lineage(
   return result;
 }
 
+template<typename SampleTypePointer>
+std::vector<reference_system::events::SourceExecutionId> event_input_lineage(
+  const SampleTypePointer & sample)
+{
+  std::vector<reference_system::events::SourceExecutionId> result;
+  result.reserve(sample->size);
+  for (uint64_t i = 0; i < sample->size; ++i) {
+    result.push_back({node_name_at(sample, i), sample->stats[i].sequence_number,
+      sample->stats[i].timestamp});
+  }
+  return result;
+}
+
 inline std::optional<source_identity_t> find_source_identity(
   const std::map<std::string, node_map_t> & nodes,
   const std::string & source_name)

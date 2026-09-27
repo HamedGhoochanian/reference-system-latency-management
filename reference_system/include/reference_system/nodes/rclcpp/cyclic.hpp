@@ -51,7 +51,7 @@ public:
               input_topic, 1,
               [this, input_number](const message_t::SharedPtr msg) {
                 input_callback(input_number, msg);
-              }), 0, message_t::SharedPtr()});
+              }), 0, message_t::SharedPtr(), std::nullopt});
       ++input_number;
     }
     publisher_ = this->create_publisher<message_t>(settings.output_topic, 1);
@@ -76,6 +76,13 @@ private:
     const message_t::SharedPtr input_message)
   {
     gettimeofday(&c1, NULL);
+    if (event_logger_) {
+      const uint32_t callback_sequence = input_callback_sequence_++;
+      const auto entry = event_logger_->input_entry(
+        callback_sequence, input_number, event_input_lineage(input_message));
+      subscriptions_[input_number].callback_id = reference_system::events::SourceExecutionId{
+        this->get_name(), callback_sequence, entry.timestamp_ns};
+    }
     subscriptions_[input_number].cache = input_message;
     gettimeofday(&c2, NULL);
     double time_diff = (c2.tv_sec - c1.tv_sec) * 1000000 + c2.tv_usec - c1.tv_usec;
@@ -95,15 +102,26 @@ private:
     output_message.get().size = 0;
 
     uint32_t missed_samples = 0;
-    for (auto & s : subscriptions_) {
+    std::vector<reference_system::events::CausalInput> causal_inputs;
+    for (size_t i = 0; i < subscriptions_.size(); ++i) {
+      auto & s = subscriptions_[i];
       if (!s.cache) {continue;}
+
+      if (event_logger_) {causal_inputs.push_back({i, *s.callback_id});}
 
       missed_samples += get_missed_samples_and_update_seq_nr(s.cache, s.sequence_number);
 
       merge_history_into_sample(output_message.get(), s.cache);
       s.cache.reset();
+      s.callback_id.reset();
     }
     set_sample(this->get_name(), timer_sequence, missed_samples, timestamp, output_message.get());
+
+    if (event_logger_) {
+      event_logger_->output_dependencies(
+        timer_sequence, timestamp, causal_inputs,
+        reference_system::events::SourceExecutionId{this->get_name(), timer_sequence, timestamp});
+    }
 
     const uint64_t previous_start_ns = previous_timestamp_;
     uint64_t period_ns = 0;
@@ -161,6 +179,7 @@ private:
     rclcpp::Subscription<message_t>::SharedPtr subscription;
     uint32_t sequence_number = 0;
     message_t::SharedPtr cache;
+    std::optional<reference_system::events::SourceExecutionId> callback_id;
   };
 
   std::vector<subscription_t> subscriptions_;
@@ -168,6 +187,7 @@ private:
   uint64_t expected_period_ns_;
   std::unique_ptr<reference_system::events::ComponentEventLogger> event_logger_;
   uint32_t sequence_number_ = 0;
+  uint32_t input_callback_sequence_ = 0;
   uint64_t previous_timestamp_ = 0;
 };
 }  // namespace rclcpp_system

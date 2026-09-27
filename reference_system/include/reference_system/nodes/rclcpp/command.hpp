@@ -81,14 +81,18 @@ private:
 
     if (node_name == "VehicleDBWSystem") {
       if (event_logger_) {
+        // The candidates are only the merged message's latest per-node snapshots.
+        // Follow input_lineage through output_dependencies/input_entry to find
+        // all contributors; none is a configured unique DBW source.
         event_logger_->sink_finish(
           chain_id_,
           std::nullopt,
           sink_sequence,
           to_event_source_ids(source_candidates),
           lineage_ids,
-          "chain_source_unconfigured",
-          "unconfigured");
+           "chain_source_unconfigured_ambiguous",
+           "unconfigured",
+           event_input_lineage(input_message));
       }
     } else if (node_name == "IntersectionOutput") {
       const uint64_t legacy_sink_timestamp = now_as_int();

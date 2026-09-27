@@ -51,6 +51,12 @@ struct SourceExecutionId
   uint64_t timestamp_ns;
 };
 
+struct CausalInput
+{
+  size_t input_index;
+  SourceExecutionId callback_id;
+};
+
 struct EventResult
 {
   uint64_t timestamp_ns = 0;
@@ -107,6 +113,20 @@ inline std::string source_identities_json(const std::vector<SourceExecutionId> &
   for (size_t i = 0; i < ids.size(); ++i) {
     if (i != 0) {json << ",";}
     json << source_execution_id_json(ids[i]);
+  }
+  json << "]";
+  return json.str();
+}
+
+inline std::string causal_inputs_json(const std::vector<CausalInput> & inputs)
+{
+  std::ostringstream json;
+  json << "[";
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    if (i != 0) {json << ",";}
+    json << "{\"input_index\":" << inputs[i].input_index;
+    json << ",\"callback_execution_id\":" << source_execution_id_json(inputs[i].callback_id);
+    json << "}";
   }
   json << "]";
   return json.str();
@@ -214,6 +234,40 @@ public:
       });
   }
 
+  EventResult input_entry(
+    uint32_t callback_sequence, size_t input_index,
+    const std::vector<SourceExecutionId> & input_lineage)
+  {
+    return emit("input_entry", [this, callback_sequence, input_index, &input_lineage]
+      (uint64_t timestamp) {
+        std::ostringstream fields;
+        fields << "\"callback_execution_id\":" << source_execution_id_json(
+          {component_, callback_sequence, timestamp});
+        fields << ",\"input_index\":" << input_index;
+        // Raw input stats: do not collapse by component. Two branches can carry
+        // different executions of the same source before the next merge.
+        fields << ",\"input_lineage\":" << source_identities_json(input_lineage);
+        return fields.str();
+      });
+  }
+
+  EventResult output_dependencies(
+    uint32_t output_sequence, uint64_t output_timestamp_ns,
+    const std::vector<CausalInput> & inputs,
+    const std::optional<SourceExecutionId> & timer_callback = std::nullopt)
+  {
+    return emit("output_dependencies", [this, output_sequence, output_timestamp_ns,
+        &inputs, &timer_callback](uint64_t) {
+        std::ostringstream fields;
+        fields << "\"output_id\":" << source_execution_id_json(
+          {component_, output_sequence, output_timestamp_ns});
+        fields << ",\"causal_inputs\":" << causal_inputs_json(inputs);
+        fields << ",\"timer_callback_execution_id\":";
+        fields << (timer_callback ? source_execution_id_json(*timer_callback) : "null");
+        return fields.str();
+      });
+  }
+
   EventResult sink_finish(
     const std::string & chain_id,
     const std::optional<SourceExecutionId> & source_id,
@@ -221,11 +275,12 @@ public:
     const std::vector<SourceExecutionId> & source_candidates,
     const std::vector<SourceExecutionId> & lineage,
     const std::string & lineage_error = "",
-    const std::string & source_selection = "configured")
+    const std::string & source_selection = "configured",
+    const std::vector<SourceExecutionId> & input_lineage = {})
   {
     return emit("sink_finish", [
         &chain_id, source_id, sink_sequence, &source_candidates, &lineage,
-        &lineage_error, &source_selection]
+        &lineage_error, &source_selection, &input_lineage]
       (uint64_t timestamp) {
         std::ostringstream fields;
         fields << "\"chain_id\":\"" << escape_json(chain_id) << "\"";
@@ -234,6 +289,7 @@ public:
         fields << ",\"sink_sequence\":" << sink_sequence;
         fields << ",\"source_candidates\":" << source_identities_json(source_candidates);
         fields << ",\"lineage\":" << source_identities_json(lineage);
+        fields << ",\"input_lineage\":" << source_identities_json(input_lineage);
         fields << ",\"source_selection\":\"" << escape_json(source_selection) << "\"";
         const bool lineage_complete = source_id.has_value() && lineage_error.empty() &&
           source_selection == "configured";
