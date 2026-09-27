@@ -66,16 +66,6 @@ void print_usage(const char * program)
   }
 }
 
-bool supports_event_logging(const std::string & node_name)
-{
-  static const std::vector<std::string> event_producer_nodes{
-    "FrontLidarDriver", "RearLidarDriver", "PointCloudMap", "Visualizer",
-    "Lanelet2Map", "EuclideanClusterSettings", "BehaviorPlanner",
-    "ObjectCollisionEstimator", "VehicleDBWSystem", "IntersectionOutput"};
-  return std::find(event_producer_nodes.begin(), event_producer_nodes.end(), node_name) !=
-         event_producer_nodes.end();
-}
-
 double input_period_scale()
 {
   const char * value = std::getenv("LAME_INPUT_PERIOD_SCALE");
@@ -105,7 +95,7 @@ bool structured_output_enabled()
   throw std::invalid_argument{"LAME_STRUCTURED_OUTPUT must be 0 or 1"};
 }
 
-void validate_event_logging_settings(const std::string & node_name)
+void validate_event_logging_settings()
 {
   const char * required = std::getenv("LAME_REQUIRE_EVENT_LOGGING");
   if (required != nullptr && std::string{required} != "0" && std::string{required} != "1") {
@@ -116,11 +106,6 @@ void validate_event_logging_settings(const std::string & node_name)
   {
     throw std::invalid_argument{
       "LAME_EVENT_DIR is required when LAME_REQUIRE_EVENT_LOGGING=1"};
-  }
-  if (required != nullptr && std::string{required} == "1" &&
-    !supports_event_logging(node_name))
-  {
-    throw std::invalid_argument{"selected node does not produce LAME event records"};
   }
   if (std::getenv("LAME_EVENT_DIR") != nullptr && std::getenv("LAME_RUN_ID") == nullptr) {
     throw std::invalid_argument{"LAME_RUN_ID is required when LAME_EVENT_DIR is set"};
@@ -146,7 +131,7 @@ int main(int argc, char * argv[])
   try {
     period_scale = input_period_scale();
     set_structured_output_enabled(structured_output_enabled());
-    validate_event_logging_settings(node_name);
+    validate_event_logging_settings();
   } catch (const std::invalid_argument & error) {
     std::cerr << error.what() << "\n";
     return 1;

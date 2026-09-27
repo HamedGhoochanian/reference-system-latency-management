@@ -14,6 +14,7 @@
 #ifndef REFERENCE_SYSTEM__NODES__RCLCPP__INTERSECTION_HPP_
 #define REFERENCE_SYSTEM__NODES__RCLCPP__INTERSECTION_HPP_
 #include <chrono>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -36,6 +37,7 @@ public:
   explicit Intersection(const IntersectionSettings & settings)
   : Node(settings.node_name)
   {
+    event_logger_ = reference_system::events::make_component_event_logger(settings.node_name);
     for (auto & connection : settings.connections) {
       connections_.emplace_back(
         Connection{
@@ -59,6 +61,15 @@ private:
   void input_callback(const message_t::SharedPtr input_message, const uint64_t id)
   {
     uint64_t timestamp = now_as_int();
+    const uint32_t output_sequence = connections_[id].sequence_number++;
+    reference_system::events::SourceExecutionId callback_id{};
+    if (event_logger_) {
+      const uint32_t callback_sequence = input_callback_sequence_++;
+      const auto entry = event_logger_->input_entry(
+        callback_sequence, id, event_input_lineage(input_message));
+      timestamp = entry.timestamp_ns;
+      callback_id = {this->get_name(), callback_sequence, timestamp};
+    }
     auto number_cruncher_result = number_cruncher(connections_[id].number_crunch_limit);
     gettimeofday(&c1, NULL);
     auto output_message = connections_[id].publisher->borrow_loaned_message();
@@ -69,9 +80,11 @@ private:
       input_message,
       connections_[id].input_sequence_number);
 
-    set_sample(
-      this->get_name(), connections_[id].sequence_number++, missed_samples, timestamp,
-      output_message.get());
+    set_sample(this->get_name(), output_sequence, missed_samples, timestamp, output_message.get());
+
+    if (event_logger_) {
+      event_logger_->output_dependencies(output_sequence, timestamp, {{id, callback_id}});
+    }
 
     // use result so that it is not optimizied away by some clever compiler
     output_message.get().data[0] = number_cruncher_result;
@@ -92,6 +105,8 @@ private:
     uint32_t input_sequence_number = 0;
   };
   std::vector<Connection> connections_;
+  std::unique_ptr<reference_system::events::ComponentEventLogger> event_logger_;
+  uint32_t input_callback_sequence_ = 0;
 };
 }  // namespace rclcpp_system
 }  // namespace nodes
