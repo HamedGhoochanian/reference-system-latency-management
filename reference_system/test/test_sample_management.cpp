@@ -19,9 +19,11 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -66,6 +68,33 @@ std::string host_boot_id()
 
 std::atomic<bool> slow_write_started{false};
 
+class ScopedEventDirectory
+{
+public:
+  explicit ScopedEventDirectory(const char * directory)
+  {
+    const char * previous = std::getenv("LAME_EVENT_DIR");
+    if (previous != nullptr) {previous_ = std::string{previous};}
+    if (directory != nullptr) {
+      setenv("LAME_EVENT_DIR", directory, 1);
+    } else {
+      unsetenv("LAME_EVENT_DIR");
+    }
+  }
+
+  ~ScopedEventDirectory()
+  {
+    if (previous_) {
+      setenv("LAME_EVENT_DIR", previous_->c_str(), 1);
+    } else {
+      unsetenv("LAME_EVENT_DIR");
+    }
+  }
+
+private:
+  std::optional<std::string> previous_;
+};
+
 ssize_t slow_write(int fd, const void * data, size_t size)
 {
   slow_write_started.store(true);
@@ -105,20 +134,64 @@ TEST(SampleManagement, DeadlineStatusUsesStrictBoundary)
   EXPECT_STREQ("violated", deadline_status(250000001U, 250000000U));
 }
 
-TEST(SampleManagement, CallbackClockUsesClockMonotonic)
+TEST(SampleManagement, ClockModeFollowsEventDirectory)
 {
-  timespec before{};
-  timespec after{};
-  ASSERT_EQ(0, clock_gettime(CLOCK_MONOTONIC, &before));
-  const uint64_t measured = now_as_int();
-  ASSERT_EQ(0, clock_gettime(CLOCK_MONOTONIC, &after));
+  const auto check_clock = [](clockid_t clock) {
+      timespec before{};
+      timespec after{};
+      ASSERT_EQ(0, clock_gettime(clock, &before));
+      const uint64_t measured = now_as_int();
+      ASSERT_EQ(0, clock_gettime(clock, &after));
+      const auto as_ns = [](const timespec & time) {
+          return static_cast<uint64_t>(time.tv_sec) * 1000000000ULL +
+                 static_cast<uint64_t>(time.tv_nsec);
+        };
+      EXPECT_LE(as_ns(before), measured);
+      EXPECT_LE(measured, as_ns(after));
+    };
+  {
+    ScopedEventDirectory disabled{nullptr};
+    check_clock(CLOCK_REALTIME);
+  }
+  {
+    ScopedEventDirectory enabled{"/tmp/events"};
+    check_clock(CLOCK_MONOTONIC);
+  }
+}
 
-  const uint64_t before_ns = static_cast<uint64_t>(before.tv_sec) * 1000000000ULL +
-    static_cast<uint64_t>(before.tv_nsec);
-  const uint64_t after_ns = static_cast<uint64_t>(after.tv_sec) * 1000000000ULL +
-    static_cast<uint64_t>(after.tv_nsec);
-  EXPECT_LE(before_ns, measured);
-  EXPECT_LE(measured, after_ns);
+TEST(SampleManagement, EventSourceMetadataAndLegacySinkUseSameClock)
+{
+  const auto directory = temporary_event_directory();
+  {
+    ScopedEventDirectory enabled{directory.c_str()};
+    reference_system::events::ComponentEventLogger logger(
+      "FrontLidarDriver", directory.string(), "clock-test");
+    const auto source = logger.source_entry(1, {"test_chain"});
+    ASSERT_TRUE(source.queued);
+
+    message_t message{};
+    set_sample("FrontLidarDriver", 1, 0, source.timestamp_ns, message);
+    const auto intermediate_timestamp = now_as_int();
+    set_sample("Intermediate", 1, 0, intermediate_timestamp, message);
+    const auto sink_timestamp = now_as_int();
+    const auto nodes = build_node_map(&message);
+    const auto source_identity = find_source_identity(nodes, "FrontLidarDriver");
+    ASSERT_TRUE(source_identity);
+    uint64_t latency = 0;
+    ASSERT_TRUE(elapsed_ns(source_identity->timestamp, sink_timestamp, latency));
+    EXPECT_LE(source.timestamp_ns, intermediate_timestamp);
+    EXPECT_LE(intermediate_timestamp, sink_timestamp);
+    EXPECT_LT(latency, 1000000000ULL);
+    const auto completion = make_structured_chain_record(
+      "test_chain", source_identity->node_name, source_identity->sequence_number,
+      source_identity->timestamp, "Sink", 1, sink_timestamp, latency,
+      {"FrontLidarDriver", "Intermediate", "Sink"}, {*source_identity},
+      "completed", 0);
+    EXPECT_EQ(source.timestamp_ns, json_integer(completion, "source_timestamp_ns"));
+    EXPECT_EQ(sink_timestamp, json_integer(completion, "sink_timestamp_ns"));
+    EXPECT_EQ(latency, json_integer(completion, "latency_ns"));
+  }
+  std::filesystem::remove_all(directory);
 }
 
 TEST(SampleManagement, KeepsNewestNodeSnapshotRegardlessOfMergeOrder)

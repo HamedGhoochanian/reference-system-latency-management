@@ -62,7 +62,15 @@ bool is_in_benchmark_mode()
 
 uint64_t now_as_int()
 {
-  return reference_system::events::monotonic_now_ns();
+  // All processes in an event-enabled run use the same clock, including nodes
+  // that do not create an event logger and the legacy diagnostic sinks.
+  if (std::getenv("LAME_EVENT_DIR") != nullptr) {
+    return reference_system::events::monotonic_now_ns();
+  }
+  return static_cast<uint64_t>(
+    std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::system_clock::now().time_since_epoch())
+    .count());
 }
 
 bool set_structured_output_enabled(const bool enabled, const bool set_value = true)
