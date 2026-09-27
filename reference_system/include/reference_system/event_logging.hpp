@@ -292,7 +292,7 @@ public:
         fields << ",\"input_lineage\":" << source_identities_json(input_lineage);
         fields << ",\"source_selection\":\"" << escape_json(source_selection) << "\"";
         const bool lineage_complete = source_id.has_value() && lineage_error.empty() &&
-          source_selection == "configured";
+          (source_selection == "configured" || source_selection == "earliest_contributor");
         fields << ",\"lineage_complete\":" << (lineage_complete ? "true" : "false");
         if (!lineage_error.empty()) {
           fields << ",\"lineage_error\":\"" << escape_json(lineage_error) << "\"";

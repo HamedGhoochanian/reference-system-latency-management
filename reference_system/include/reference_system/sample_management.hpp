@@ -198,6 +198,46 @@ struct source_identity_t
   uint64_t timestamp;
 };
 
+// The workload only uses data[0]. In event-enabled runs, data[1..3] preserve
+// the oldest contributing sensor callback even when merged stats keep a newer
+// snapshot of that sensor. The message remains 4 KiB.
+inline uint64_t source_name_key(const std::string & name)
+{
+  uint64_t key = 14695981039346656037ULL;
+  for (const unsigned char c : name) {
+    key = (key ^ c) * 1099511628211ULL;
+  }
+  return key;
+}
+
+template<typename SampleType>
+void mark_source(SampleType & sample, const source_identity_t & source)
+{
+  if (std::getenv("LAME_EVENT_DIR") == nullptr) {return;}
+  const uint64_t key = source_name_key(source.node_name);
+  std::memcpy(&sample.data[1], &key, sizeof(key));
+  sample.data[2] = source.sequence_number;
+  sample.data[3] = static_cast<int64_t>(source.timestamp);
+}
+
+template<typename SampleTypePointer>
+std::optional<source_identity_t> oldest_source(
+  const SampleTypePointer & sample, const std::vector<std::string> & names)
+{
+  if (std::getenv("LAME_EVENT_DIR") == nullptr || sample->data[3] <= 0) {
+    return std::nullopt;
+  }
+  uint64_t key = 0;
+  std::memcpy(&key, &sample->data[1], sizeof(key));
+  for (const auto & name : names) {
+    if (source_name_key(name) == key) {
+      return source_identity_t{name, static_cast<uint32_t>(sample->data[2]),
+        static_cast<uint64_t>(sample->data[3])};
+    }
+  }
+  return std::nullopt;
+}
+
 inline reference_system::events::SourceExecutionId to_event_source_id(
   const source_identity_t & id)
 {
@@ -619,6 +659,13 @@ template<typename SampleTypePointer, typename SourceType>
 void merge_history_into_sample(SampleTypePointer & sample, const SourceType & source)
 {
   if (is_in_benchmark_mode()) {return;}
+
+  if (std::getenv("LAME_EVENT_DIR") != nullptr) {
+    if (sample.size == 0) {sample.data[3] = 0;}
+    if (source->data[3] > 0 && (sample.data[3] == 0 || source->data[3] < sample.data[3])) {
+      std::copy_n(source->data.begin() + 1, 3, sample.data.begin() + 1);
+    }
+  }
 
   uint64_t unique_size = 0;
   for (uint64_t i = 0; i < sample.size; ++i) {

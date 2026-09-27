@@ -95,6 +95,45 @@ private:
   std::optional<std::string> previous_;
 };
 
+TEST(SampleManagement, OldestContributingSourceSurvivesNewerSnapshots)
+{
+  ScopedEventDirectory enabled{"/tmp/events"};
+  message_t early{};
+  early.size = 0;
+  set_sample("FrontLidarDriver", 1, 0, 100, early);
+  mark_source(early, {"FrontLidarDriver", 1, 100});
+
+  message_t late{};
+  late.size = 0;
+  set_sample("FrontLidarDriver", 2, 0, 200, late);
+  mark_source(late, {"FrontLidarDriver", 2, 200});
+
+  message_t other{};
+  other.size = 0;
+  set_sample("PointCloudMap", 3, 0, 150, other);
+  mark_source(other, {"PointCloudMap", 3, 150});
+
+  message_t merged{};
+  merged.size = 0;
+  merge_history_into_sample(merged, &early);
+  merge_history_into_sample(merged, &late);
+  merge_history_into_sample(merged, &other);
+  const auto latest = build_node_map(&merged);
+  ASSERT_EQ(2U, latest.at("FrontLidarDriver").sequence_number);
+
+  const auto first = oldest_source(&merged, {"FrontLidarDriver", "PointCloudMap"});
+  ASSERT_TRUE(first.has_value());
+  EXPECT_EQ("FrontLidarDriver", first->node_name);
+  EXPECT_EQ(1U, first->sequence_number);
+  EXPECT_EQ(100U, first->timestamp);
+
+  message_t next{};
+  next.size = 0;
+  merge_history_into_sample(next, &merged);
+  ASSERT_TRUE(oldest_source(&next, {"FrontLidarDriver", "PointCloudMap"}).has_value());
+  EXPECT_EQ(100U, oldest_source(&next, {"FrontLidarDriver", "PointCloudMap"})->timestamp);
+}
+
 ssize_t slow_write(int fd, const void * data, size_t size)
 {
   slow_write_started.store(true);

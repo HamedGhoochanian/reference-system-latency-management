@@ -100,6 +100,7 @@ private:
     gettimeofday(&c1, NULL);
     auto output_message = publisher_->borrow_loaned_message();
     output_message.get().size = 0;
+    if (event_logger_) {output_message.get().data[3] = 0;}
 
     uint32_t missed_samples = 0;
     std::vector<reference_system::events::CausalInput> causal_inputs;

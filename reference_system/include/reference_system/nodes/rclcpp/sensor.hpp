@@ -63,6 +63,8 @@ private:
 
     set_sample(this->get_name(), sequence, 0, timestamp, message.get());
 
+    mark_source(message.get(), {this->get_name(), sequence, timestamp});
+
     publisher_->publish(std::move(message));
     if (is_structured_output_enabled()) {
       std::string node_name = this->get_name();

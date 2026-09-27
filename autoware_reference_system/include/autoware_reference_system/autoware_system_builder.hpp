@@ -58,7 +58,8 @@ auto create_autoware_nodes(
         nodes::SensorSettings{.node_name = "FrontLidarDriver",
           .topic_name = "FrontLidarDriver",
           .cycle_time = input_period(TimingConfig::FRONT_LIDAR_DRIVER),
-          .chain_ids = {"perception_collision_hot_path"},
+          .chain_ids = {"perception_collision_hot_path",
+            "perception_localization_planning_control_to_dbw"},
           #ifdef PICAS
           .callback_priority = CallbackPriority::FRONT_LIDAR_DRIVER_CALLBACK
           #endif
@@ -71,7 +72,7 @@ auto create_autoware_nodes(
         nodes::SensorSettings{.node_name = "RearLidarDriver",
           .topic_name = "RearLidarDriver",
           .cycle_time = input_period(TimingConfig::REAR_LIDAR_DRIVER),
-          .chain_ids = {},
+          .chain_ids = {"perception_localization_planning_control_to_dbw"},
           #ifdef PICAS
           .callback_priority = CallbackPriority::REAR_LIDAR_DRIVER_CALLBACK
           #endif
@@ -84,7 +85,7 @@ auto create_autoware_nodes(
         nodes::SensorSettings{.node_name = "PointCloudMap",
           .topic_name = "PointCloudMap",
           .cycle_time = input_period(TimingConfig::POINT_CLOUD_MAP),
-          .chain_ids = {},
+          .chain_ids = {"perception_localization_planning_control_to_dbw"},
           #ifdef PICAS
           .callback_priority = CallbackPriority::POINT_CLOUD_MAP_CALLBACK
           #endif
@@ -97,7 +98,7 @@ auto create_autoware_nodes(
         nodes::SensorSettings{.node_name = "Visualizer",
           .topic_name = "Visualizer",
           .cycle_time = input_period(TimingConfig::VISUALIZER),
-          .chain_ids = {},
+          .chain_ids = {"perception_localization_planning_control_to_dbw"},
           #ifdef PICAS
           .callback_priority = CallbackPriority::VISUALIZER_CALLBACK
           #endif
@@ -110,7 +111,7 @@ auto create_autoware_nodes(
         nodes::SensorSettings{.node_name = "Lanelet2Map",
           .topic_name = "Lanelet2Map",
           .cycle_time = input_period(TimingConfig::LANELET2MAP),
-          .chain_ids = {},
+          .chain_ids = {"perception_localization_planning_control_to_dbw"},
           #ifdef PICAS
           .callback_priority = CallbackPriority::LANELET_2_MAP_CALLBACK
           #endif
@@ -123,7 +124,8 @@ auto create_autoware_nodes(
         nodes::SensorSettings{.node_name = "EuclideanClusterSettings",
           .topic_name = "EuclideanClusterSettings",
           .cycle_time = input_period(TimingConfig::EUCLIDEAN_CLUSTER_SETTINGS),
-          .chain_ids = {"euclidean_settings_to_intersection_output"},
+          .chain_ids = {"euclidean_settings_to_intersection_output",
+            "perception_localization_planning_control_to_dbw"},
           #ifdef PICAS
           .callback_priority = CallbackPriority::EUCLIDEAN_CLUSTER_SETTINGS_CALLBACK
           #endif
