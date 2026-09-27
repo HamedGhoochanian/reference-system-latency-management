@@ -26,10 +26,8 @@
 #include <vector>
 #include <limits>
 #include <mutex>
-#include <optional>
 #include <unistd.h>
 
-#include "reference_system/event_logging.hpp"
 #include "reference_system/msg_types.hpp"
 
 inline std::mutex & reference_system_cout_mutex()
@@ -62,11 +60,6 @@ bool is_in_benchmark_mode()
 
 uint64_t now_as_int()
 {
-  // All processes in an event-enabled run use the same clock, including nodes
-  // that do not create an event logger and the legacy diagnostic sinks.
-  if (std::getenv("LAME_EVENT_DIR") != nullptr) {
-    return reference_system::events::monotonic_now_ns();
-  }
   return static_cast<uint64_t>(
     std::chrono::duration_cast<std::chrono::nanoseconds>(
       std::chrono::system_clock::now().time_since_epoch())
@@ -197,112 +190,6 @@ struct source_identity_t
   uint32_t sequence_number;
   uint64_t timestamp;
 };
-
-// The workload only uses data[0]. In event-enabled runs, data[1..3] preserve
-// the oldest contributing sensor callback even when merged stats keep a newer
-// snapshot of that sensor. The message remains 4 KiB.
-inline uint64_t source_name_key(const std::string & name)
-{
-  uint64_t key = 14695981039346656037ULL;
-  for (const unsigned char c : name) {
-    key = (key ^ c) * 1099511628211ULL;
-  }
-  return key;
-}
-
-template<typename SampleType>
-void mark_source(SampleType & sample, const source_identity_t & source)
-{
-  if (std::getenv("LAME_EVENT_DIR") == nullptr) {return;}
-  const uint64_t key = source_name_key(source.node_name);
-  std::memcpy(&sample.data[1], &key, sizeof(key));
-  sample.data[2] = source.sequence_number;
-  sample.data[3] = static_cast<int64_t>(source.timestamp);
-}
-
-template<typename SampleTypePointer>
-std::optional<source_identity_t> oldest_source(
-  const SampleTypePointer & sample, const std::vector<std::string> & names)
-{
-  if (std::getenv("LAME_EVENT_DIR") == nullptr || sample->data[3] <= 0) {
-    return std::nullopt;
-  }
-  uint64_t key = 0;
-  std::memcpy(&key, &sample->data[1], sizeof(key));
-  for (const auto & name : names) {
-    if (source_name_key(name) == key) {
-      return source_identity_t{name, static_cast<uint32_t>(sample->data[2]),
-        static_cast<uint64_t>(sample->data[3])};
-    }
-  }
-  return std::nullopt;
-}
-
-inline reference_system::events::SourceExecutionId to_event_source_id(
-  const source_identity_t & id)
-{
-  return {id.node_name, id.sequence_number, id.timestamp};
-}
-
-inline std::vector<reference_system::events::SourceExecutionId> to_event_source_ids(
-  const std::vector<source_identity_t> & ids)
-{
-  std::vector<reference_system::events::SourceExecutionId> result;
-  result.reserve(ids.size());
-  for (const auto & id : ids) {
-    result.push_back(to_event_source_id(id));
-  }
-  return result;
-}
-
-inline std::vector<reference_system::events::SourceExecutionId> event_lineage(
-  const std::map<std::string, node_map_t> & nodes)
-{
-  std::vector<reference_system::events::SourceExecutionId> result;
-  result.reserve(nodes.size());
-  for (const auto & node : nodes) {
-    result.push_back({node.first, node.second.sequence_number, node.second.timestamp});
-  }
-  return result;
-}
-
-template<typename SampleTypePointer>
-std::vector<reference_system::events::SourceExecutionId> event_input_lineage(
-  const SampleTypePointer & sample)
-{
-  std::vector<reference_system::events::SourceExecutionId> result;
-  result.reserve(sample->size);
-  for (uint64_t i = 0; i < sample->size; ++i) {
-    result.push_back({node_name_at(sample, i), sample->stats[i].sequence_number,
-      sample->stats[i].timestamp});
-  }
-  return result;
-}
-
-inline std::optional<source_identity_t> find_source_identity(
-  const std::map<std::string, node_map_t> & nodes,
-  const std::string & source_name)
-{
-  const auto found = nodes.find(source_name);
-  if (found == nodes.end()) {return std::nullopt;}
-  return source_identity_t{
-    source_name, found->second.sequence_number, found->second.timestamp};
-}
-
-inline std::vector<source_identity_t> find_source_identities(
-  const std::map<std::string, node_map_t> & nodes,
-  const std::vector<std::string> & source_names)
-{
-  std::vector<source_identity_t> result;
-  result.reserve(source_names.size());
-  for (const auto & source_name : source_names) {
-    const auto found = nodes.find(source_name);
-    if (found != nodes.end()) {
-      result.push_back({source_name, found->second.sequence_number, found->second.timestamp});
-    }
-  }
-  return result;
-}
 
 inline bool is_newer_source_identity(
   const source_identity_t & candidate, const source_identity_t & current)
@@ -660,13 +547,6 @@ void merge_history_into_sample(SampleTypePointer & sample, const SourceType & so
 {
   if (is_in_benchmark_mode()) {return;}
 
-  if (std::getenv("LAME_EVENT_DIR") != nullptr) {
-    if (sample.size == 0) {sample.data[3] = 0;}
-    if (source->data[3] > 0 && (sample.data[3] == 0 || source->data[3] < sample.data[3])) {
-      std::copy_n(source->data.begin() + 1, 3, sample.data.begin() + 1);
-    }
-  }
-
   uint64_t unique_size = 0;
   for (uint64_t i = 0; i < sample.size; ++i) {
     const std::string name = node_name_at(&sample, i);
@@ -799,7 +679,9 @@ void print_sample_path(
 
   auto iter = advanced_statistics.find(node_name);
   if (iter == advanced_statistics.end() ) {
-    advanced_statistics[node_name].timepoint_of_first_received_sample = now_as_int();
+    advanced_statistics[node_name].timepoint_of_first_received_sample =
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::system_clock::now().time_since_epoch()).count();
     advanced_statistics[node_name].latency.suffix = "ms";
     advanced_statistics[node_name].latency.adjustment = 1000000.0;
     advanced_statistics[node_name].hot_path_latency.suffix = "ms";
@@ -808,7 +690,10 @@ void print_sample_path(
     advanced_statistics[node_name].behavior_planner_period.adjustment = 1000000.0;
   }
 
-  const uint64_t timestamp_in_ns = now_as_int();
+  const uint64_t timestamp_in_ns = static_cast<uint64_t>(
+    std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::system_clock::now().time_since_epoch())
+    .count());
 
   std::cout << "----------------------------------------------------------" <<
     std::endl;

@@ -17,8 +17,6 @@
 #include <string>
 #include <utility>
 #include <iostream>
-#include <memory>
-#include <optional>
 #include <sys/time.h>
 #include "rclcpp/rclcpp.hpp"
 #include "reference_system/nodes/settings.hpp"
@@ -38,7 +36,6 @@ public:
   : Node(settings.node_name),
     number_crunch_limit_(settings.number_crunch_limit)
   {
-    event_logger_ = reference_system::events::make_component_event_logger(settings.node_name);
     subscriptions_[0].subscription = this->create_subscription<message_t>(
       settings.input_0, 1,
       [this](const message_t::SharedPtr msg) {input_callback(0U, msg);});
@@ -61,13 +58,6 @@ private:
   {
     gettimeofday(&c1, NULL);
     uint64_t timestamp = now_as_int();
-    if (event_logger_) {
-      const uint32_t callback_sequence = input_callback_sequence_++;
-      const auto entry = event_logger_->input_entry(
-        callback_sequence, input_number, event_input_lineage(input_message));
-      subscriptions_[input_number].callback_id = reference_system::events::SourceExecutionId{
-        this->get_name(), callback_sequence, entry.timestamp_ns};
-    }
     subscriptions_[input_number].cache = input_message;
     gettimeofday(&c2, NULL);
     if (input_number != 0) {
@@ -98,16 +88,9 @@ private:
     output_message.get().size = 0;
     merge_history_into_sample(output_message.get(), subscriptions_[0].cache);
     merge_history_into_sample(output_message.get(), subscriptions_[1].cache);
-    const uint32_t output_sequence = sequence_number_++;
     set_sample(
-      this->get_name(), output_sequence, missed_samples, timestamp,
+      this->get_name(), sequence_number_++, missed_samples, timestamp,
       output_message.get());
-
-    if (event_logger_) {
-      event_logger_->output_dependencies(
-        output_sequence, timestamp,
-        {{0, *subscriptions_[0].callback_id}, {1, *subscriptions_[1].callback_id}});
-    }
 
     output_message.get().data[0] = number_cruncher_result;
     publisher_->publish(std::move(output_message));
@@ -126,7 +109,6 @@ private:
     rclcpp::Subscription<message_t>::SharedPtr subscription;
     uint32_t sequence_number = 0;
     message_t::SharedPtr cache;
-    std::optional<reference_system::events::SourceExecutionId> callback_id;
   };
   rclcpp::Publisher<message_t>::SharedPtr publisher_;
 
@@ -134,8 +116,6 @@ private:
 
   uint64_t number_crunch_limit_;
   uint32_t sequence_number_ = 0;
-  uint32_t input_callback_sequence_ = 0;
-  std::unique_ptr<reference_system::events::ComponentEventLogger> event_logger_;
 };
 }  // namespace rclcpp_system
 }  // namespace nodes

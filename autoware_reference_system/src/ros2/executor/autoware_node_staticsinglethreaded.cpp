@@ -1,17 +1,3 @@
-// Copyright 2026 Eindhoven University of Technology
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
@@ -94,23 +80,6 @@ bool structured_output_enabled()
   }
   throw std::invalid_argument{"LAME_STRUCTURED_OUTPUT must be 0 or 1"};
 }
-
-void validate_event_logging_settings()
-{
-  const char * required = std::getenv("LAME_REQUIRE_EVENT_LOGGING");
-  if (required != nullptr && std::string{required} != "0" && std::string{required} != "1") {
-    throw std::invalid_argument{"LAME_REQUIRE_EVENT_LOGGING must be 0 or 1"};
-  }
-  if (required != nullptr && std::string{required} == "1" &&
-    std::getenv("LAME_EVENT_DIR") == nullptr)
-  {
-    throw std::invalid_argument{
-      "LAME_EVENT_DIR is required when LAME_REQUIRE_EVENT_LOGGING=1"};
-  }
-  if (std::getenv("LAME_EVENT_DIR") != nullptr && std::getenv("LAME_RUN_ID") == nullptr) {
-    throw std::invalid_argument{"LAME_RUN_ID is required when LAME_EVENT_DIR is set"};
-  }
-}
 }  // namespace
 
 int main(int argc, char * argv[])
@@ -131,7 +100,6 @@ int main(int argc, char * argv[])
   try {
     period_scale = input_period_scale();
     set_structured_output_enabled(structured_output_enabled());
-    validate_event_logging_settings();
   } catch (const std::invalid_argument & error) {
     std::cerr << error.what() << "\n";
     return 1;
@@ -140,14 +108,7 @@ int main(int argc, char * argv[])
   rclcpp::init(argc, argv);
 
   using TimeConfig = nodes::timing::Default;
-  std::vector<std::shared_ptr<RclcppSystem::NodeBaseType>> nodes;
-  try {
-    nodes = create_autoware_nodes<RclcppSystem, TimeConfig>({node_name}, period_scale);
-  } catch (const std::exception & error) {
-    std::cerr << "could not initialize LAME node: " << error.what() << "\n";
-    rclcpp::shutdown();
-    return 1;
-  }
+  auto nodes = create_autoware_nodes<RclcppSystem, TimeConfig>({node_name}, period_scale);
 
   rclcpp::executors::StaticSingleThreadedExecutor executor;
   for (auto & node : nodes) {

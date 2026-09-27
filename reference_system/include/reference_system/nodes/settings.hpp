@@ -25,9 +25,6 @@ struct CommandSettings
 {
   std::string node_name;
   std::string input_topic;
-  std::string chain_id{};
-  std::vector<std::string> source_candidate_names{};
-  std::string configured_source_name{};
 #ifdef PICAS
   int callback_priority;
 #endif
@@ -52,9 +49,6 @@ struct TransformSettings
   std::string input_topic;
   std::string output_topic;
   uint64_t number_crunch_limit;
-  std::string chain_id{};
-  std::vector<std::string> source_candidate_names{};
-  std::string configured_source_name{};
 #ifdef PICAS
   int callback_priority;
 #endif
@@ -99,7 +93,6 @@ struct SensorSettings
   std::string node_name;
   std::string topic_name;
   std::chrono::nanoseconds cycle_time;
-  std::vector<std::string> chain_ids{};
 #ifdef PICAS
   int callback_priority;
 #endif

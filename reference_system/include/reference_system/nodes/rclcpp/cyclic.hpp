@@ -18,8 +18,6 @@
 #include <utility>
 #include <vector>
 #include <iostream>
-#include <memory>
-#include <sstream>
 #include <sys/time.h>
 #include "rclcpp/rclcpp.hpp"
 #include "reference_system/nodes/settings.hpp"
@@ -37,12 +35,8 @@ class Cyclic : public rclcpp::Node
 public:
   explicit Cyclic(const CyclicSettings & settings)
   : Node(settings.node_name),
-    number_crunch_limit_(settings.number_crunch_limit),
-    expected_period_ns_(static_cast<uint64_t>(settings.cycle_time.count()))
+    number_crunch_limit_(settings.number_crunch_limit)
   {
-    if (settings.node_name == "BehaviorPlanner") {
-      event_logger_ = reference_system::events::make_component_event_logger(settings.node_name);
-    }
     uint64_t input_number = 0U;
     for (const auto & input_topic : settings.inputs) {
       subscriptions_.emplace_back(
@@ -51,7 +45,7 @@ public:
               input_topic, 1,
               [this, input_number](const message_t::SharedPtr msg) {
                 input_callback(input_number, msg);
-              }), 0, message_t::SharedPtr(), std::nullopt});
+              }), 0, message_t::SharedPtr()});
       ++input_number;
     }
     publisher_ = this->create_publisher<message_t>(settings.output_topic, 1);
@@ -76,13 +70,6 @@ private:
     const message_t::SharedPtr input_message)
   {
     gettimeofday(&c1, NULL);
-    if (event_logger_) {
-      const uint32_t callback_sequence = input_callback_sequence_++;
-      const auto entry = event_logger_->input_entry(
-        callback_sequence, input_number, event_input_lineage(input_message));
-      subscriptions_[input_number].callback_id = reference_system::events::SourceExecutionId{
-        this->get_name(), callback_sequence, entry.timestamp_ns};
-    }
     subscriptions_[input_number].cache = input_message;
     gettimeofday(&c2, NULL);
     double time_diff = (c2.tv_sec - c1.tv_sec) * 1000000 + c2.tv_usec - c1.tv_usec;
@@ -91,84 +78,60 @@ private:
 
   void timer_callback()
   {
-    const uint32_t timer_sequence = sequence_number_++;
     uint64_t timestamp = now_as_int();
-    if (event_logger_) {
-      timestamp = event_logger_->callback_entry(timer_sequence).timestamp_ns;
-    }
     auto number_cruncher_result = number_cruncher(number_crunch_limit_);
     gettimeofday(&c1, NULL);
     auto output_message = publisher_->borrow_loaned_message();
     output_message.get().size = 0;
-    if (event_logger_) {output_message.get().data[3] = 0;}
 
     uint32_t missed_samples = 0;
-    std::vector<reference_system::events::CausalInput> causal_inputs;
-    for (size_t i = 0; i < subscriptions_.size(); ++i) {
-      auto & s = subscriptions_[i];
+    for (auto & s : subscriptions_) {
       if (!s.cache) {continue;}
-
-      if (event_logger_) {causal_inputs.push_back({i, *s.callback_id});}
 
       missed_samples += get_missed_samples_and_update_seq_nr(s.cache, s.sequence_number);
 
       merge_history_into_sample(output_message.get(), s.cache);
       s.cache.reset();
-      s.callback_id.reset();
     }
-    set_sample(this->get_name(), timer_sequence, missed_samples, timestamp, output_message.get());
+    set_sample(
+      this->get_name(), sequence_number_++, missed_samples, timestamp,
+      output_message.get());
 
-    if (event_logger_) {
-      event_logger_->output_dependencies(
-        timer_sequence, timestamp, causal_inputs,
-        reference_system::events::SourceExecutionId{this->get_name(), timer_sequence, timestamp});
-    }
-
-    const uint64_t previous_start_ns = previous_timestamp_;
-    uint64_t period_ns = 0;
     bool has_period = false;
-    if (previous_start_ns != 0 && elapsed_ns(previous_start_ns, timestamp, period_ns)) {
-      has_period = true;
+    uint64_t period_ns = 0;
+    bool violated = false;
+    if (is_structured_output_enabled() && previous_timestamp_ != 0) {
+      uint64_t elapsed;
+      if (elapsed_ns(previous_timestamp_, timestamp, elapsed)) {
+        period_ns = elapsed / std::max(sequence_number_ - 1 - previous_sequence_, 1U);
+        double period_ms = static_cast<double>(period_ns) / 1000000.0;
+        violated = std::abs(period_ms - 100.0) > 10.0;
+        has_period = true;
+      }
     }
     previous_timestamp_ = timestamp;
+    previous_sequence_ = sequence_number_ - 1;
 
     output_message.get().data[0] = number_cruncher_result;
     publisher_->publish(std::move(output_message));
+    uint64_t sink_timestamp = now_as_int();
+    if (is_structured_output_enabled()) {
+      emit_structured_source_record(this->get_name(), sequence_number_ - 1, timestamp);
+      if (has_period) {
+        std::vector<std::string> lineage{this->get_name()};
+        emit_structured_chain_record(
+          "behavior_planner_cyclic_jitter",
+          this->get_name(), sequence_number_ - 1, timestamp,
+          this->get_name(), sequence_number_ - 1, sink_timestamp,
+          period_ns, lineage,
+          std::vector<source_identity_t>{{this->get_name(), sequence_number_ - 1, timestamp}},
+          violated ? "violated" : "completed", 0);
+      }
+    }
     gettimeofday(&c2, NULL);
     print_execution_time(
       "Cyclic", std::string(this->get_name()) + "Timer",
       (c2.tv_sec - c1.tv_sec) * 1000000 + (c2.tv_usec - c1.tv_usec));
-
-    uint64_t finish_timestamp_ns = 0;
-    if (event_logger_) {
-      finish_timestamp_ns = event_logger_->behavior_planner_jitter(
-        timer_sequence, timestamp, previous_start_ns, expected_period_ns_).timestamp_ns;
-    } else {
-      finish_timestamp_ns = now_as_int();
-    }
-
-    if (is_structured_output_enabled()) {
-      std::ostringstream record;
-      record << "{\"schema_version\":3,\"record_type\":\"diagnostic\"";
-      record << ",\"diagnostic_name\":\"behavior_planner_timer_period\"";
-      record << ",\"callback_sequence\":" << timer_sequence;
-      record << ",\"callback_start_ns\":" << timestamp;
-      record << ",\"callback_finish_ns\":" << finish_timestamp_ns;
-      record << ",\"expected_period_ns\":" << expected_period_ns_;
-      if (has_period) {
-        record << ",\"period_ns\":" << period_ns;
-        record << ",\"period_error_ns\":";
-        if (period_ns >= expected_period_ns_) {
-          record << (period_ns - expected_period_ns_);
-        } else {
-          record << "-" << (expected_period_ns_ - period_ns);
-        }
-      } else {
-        record << ",\"period_ns\":null,\"period_error_ns\":null";
-      }
-      record << "}\n";
-      write_structured_record(record.str());
-    }
   }
 
 private:
@@ -180,16 +143,13 @@ private:
     rclcpp::Subscription<message_t>::SharedPtr subscription;
     uint32_t sequence_number = 0;
     message_t::SharedPtr cache;
-    std::optional<reference_system::events::SourceExecutionId> callback_id;
   };
 
   std::vector<subscription_t> subscriptions_;
   uint64_t number_crunch_limit_;
-  uint64_t expected_period_ns_;
-  std::unique_ptr<reference_system::events::ComponentEventLogger> event_logger_;
   uint32_t sequence_number_ = 0;
-  uint32_t input_callback_sequence_ = 0;
   uint64_t previous_timestamp_ = 0;
+  uint32_t previous_sequence_ = 0;
 };
 }  // namespace rclcpp_system
 }  // namespace nodes

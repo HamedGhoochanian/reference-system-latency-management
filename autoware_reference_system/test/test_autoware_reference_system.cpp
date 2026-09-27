@@ -34,7 +34,6 @@ struct TestNode
   {
     record(settings.node_name);
     sensor_period = settings.cycle_time;
-    sensor_chain_ids = settings.chain_ids;
   }
   explicit TestNode(const nodes::TransformSettings & settings) { record(settings.node_name); }
 
@@ -42,7 +41,6 @@ struct TestNode
 
   static std::vector<std::string> constructed_names;
   std::chrono::nanoseconds sensor_period{0};
-  std::vector<std::string> sensor_chain_ids;
 
 private:
   void record(const std::string & node_name)
@@ -111,29 +109,5 @@ TEST_F(AutowareSystemBuilderTest, InputPeriodScaleChangesSensorPeriod)
 
   ASSERT_EQ(built_nodes.size(), 1U);
   EXPECT_EQ(built_nodes.front()->sensor_period, std::chrono::milliseconds{50});
-}
-
-TEST_F(AutowareSystemBuilderTest, ConfiguresOnlyKnownSensorChainSources)
-{
-  const auto front = create_autoware_nodes<TestSystem, nodes::timing::Default>(
-    {"FrontLidarDriver"});
-  ASSERT_EQ(front.size(), 1U);
-  EXPECT_EQ(
-    front.front()->sensor_chain_ids,
-    std::vector<std::string>{"perception_collision_hot_path"});
-
-  TestNode::constructed_names.clear();
-  const auto settings = create_autoware_nodes<TestSystem, nodes::timing::Default>(
-    {"EuclideanClusterSettings"});
-  ASSERT_EQ(settings.size(), 1U);
-  EXPECT_EQ(
-    settings.front()->sensor_chain_ids,
-    std::vector<std::string>{"euclidean_settings_to_intersection_output"});
-
-  TestNode::constructed_names.clear();
-  const auto rear = create_autoware_nodes<TestSystem, nodes::timing::Default>(
-    {"RearLidarDriver"});
-  ASSERT_EQ(rear.size(), 1U);
-  EXPECT_TRUE(rear.front()->sensor_chain_ids.empty());
 }
 }  // namespace

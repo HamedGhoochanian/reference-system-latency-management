@@ -58,8 +58,6 @@ auto create_autoware_nodes(
         nodes::SensorSettings{.node_name = "FrontLidarDriver",
           .topic_name = "FrontLidarDriver",
           .cycle_time = input_period(TimingConfig::FRONT_LIDAR_DRIVER),
-          .chain_ids = {"perception_collision_hot_path",
-            "perception_localization_planning_control_to_dbw"},
           #ifdef PICAS
           .callback_priority = CallbackPriority::FRONT_LIDAR_DRIVER_CALLBACK
           #endif
@@ -72,7 +70,6 @@ auto create_autoware_nodes(
         nodes::SensorSettings{.node_name = "RearLidarDriver",
           .topic_name = "RearLidarDriver",
           .cycle_time = input_period(TimingConfig::REAR_LIDAR_DRIVER),
-          .chain_ids = {"perception_localization_planning_control_to_dbw"},
           #ifdef PICAS
           .callback_priority = CallbackPriority::REAR_LIDAR_DRIVER_CALLBACK
           #endif
@@ -85,7 +82,6 @@ auto create_autoware_nodes(
         nodes::SensorSettings{.node_name = "PointCloudMap",
           .topic_name = "PointCloudMap",
           .cycle_time = input_period(TimingConfig::POINT_CLOUD_MAP),
-          .chain_ids = {"perception_localization_planning_control_to_dbw"},
           #ifdef PICAS
           .callback_priority = CallbackPriority::POINT_CLOUD_MAP_CALLBACK
           #endif
@@ -98,7 +94,6 @@ auto create_autoware_nodes(
         nodes::SensorSettings{.node_name = "Visualizer",
           .topic_name = "Visualizer",
           .cycle_time = input_period(TimingConfig::VISUALIZER),
-          .chain_ids = {"perception_localization_planning_control_to_dbw"},
           #ifdef PICAS
           .callback_priority = CallbackPriority::VISUALIZER_CALLBACK
           #endif
@@ -111,7 +106,6 @@ auto create_autoware_nodes(
         nodes::SensorSettings{.node_name = "Lanelet2Map",
           .topic_name = "Lanelet2Map",
           .cycle_time = input_period(TimingConfig::LANELET2MAP),
-          .chain_ids = {"perception_localization_planning_control_to_dbw"},
           #ifdef PICAS
           .callback_priority = CallbackPriority::LANELET_2_MAP_CALLBACK
           #endif
@@ -124,8 +118,6 @@ auto create_autoware_nodes(
         nodes::SensorSettings{.node_name = "EuclideanClusterSettings",
           .topic_name = "EuclideanClusterSettings",
           .cycle_time = input_period(TimingConfig::EUCLIDEAN_CLUSTER_SETTINGS),
-          .chain_ids = {"euclidean_settings_to_intersection_output",
-            "perception_localization_planning_control_to_dbw"},
           #ifdef PICAS
           .callback_priority = CallbackPriority::EUCLIDEAN_CLUSTER_SETTINGS_CALLBACK
           #endif
@@ -207,14 +199,11 @@ auto create_autoware_nodes(
     nodes.emplace_back(
       std::make_shared<typename SystemType::Transform>(
         nodes::TransformSettings{
-        .node_name = "ObjectCollisionEstimator",
-        .input_topic = "EuclideanClusterDetector",
-        .output_topic = "ObjectCollisionEstimator",
-        .number_crunch_limit = TimingConfig::OBJECT_COLLISION_ESTIMATOR,
-        .chain_id = "perception_collision_hot_path",
-        .source_candidate_names = {"FrontLidarDriver", "RearLidarDriver"},
-        .configured_source_name = "FrontLidarDriver",
-        #ifdef PICAS
+      .node_name = "ObjectCollisionEstimator",
+      .input_topic = "EuclideanClusterDetector",
+      .output_topic = "ObjectCollisionEstimator",
+      .number_crunch_limit = TimingConfig::OBJECT_COLLISION_ESTIMATOR,
+      #ifdef PICAS
       .callback_priority = CallbackPriority::OBJECT_COLLISION_ESTIMATOR_CALLBACK
       #endif
     }));
@@ -398,9 +387,6 @@ auto create_autoware_nodes(
       std::make_shared<typename SystemType::Command>(
         nodes::CommandSettings{
       .node_name = "VehicleDBWSystem", .input_topic = "VehicleInterface",
-      .chain_id = "perception_localization_planning_control_to_dbw",
-      .source_candidate_names = {"FrontLidarDriver", "RearLidarDriver", "PointCloudMap",
-        "Visualizer", "Lanelet2Map", "EuclideanClusterSettings"},
       #ifdef PICAS
       .callback_priority = CallbackPriority::VEHICLE_DBW_SYSTEM_CALLBACK
       #endif
@@ -413,9 +399,6 @@ auto create_autoware_nodes(
         nodes::CommandSettings{
       .node_name = "IntersectionOutput",
       .input_topic = "EuclideanIntersection",
-      .chain_id = "euclidean_settings_to_intersection_output",
-      .source_candidate_names = {"EuclideanClusterSettings"},
-      .configured_source_name = "EuclideanClusterSettings",
       #ifdef PICAS
       .callback_priority = CallbackPriority::INTERSECTION_OUTPUT_CALLBACK
       #endif

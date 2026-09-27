@@ -14,14 +14,10 @@
 #ifndef REFERENCE_SYSTEM__NODES__RCLCPP__COMMAND_HPP_
 #define REFERENCE_SYSTEM__NODES__RCLCPP__COMMAND_HPP_
 
-#include <sys/time.h>
-
 #include <chrono>
-#include <iostream>
-#include <memory>
-#include <optional>
 #include <string>
-#include <vector>
+#include <iostream>
+#include <sys/time.h>
 #include "rclcpp/rclcpp.hpp"
 #include "reference_system/nodes/settings.hpp"
 #include "reference_system/sample_management.hpp"
@@ -36,14 +32,8 @@ class Command : public rclcpp::Node
 {
 public:
   explicit Command(const CommandSettings & settings)
-  : Node(settings.node_name),
-    chain_id_(settings.chain_id),
-    source_candidate_names_(settings.source_candidate_names),
-    configured_source_name_(settings.configured_source_name)
+  : Node(settings.node_name)
   {
-    if (!chain_id_.empty()) {
-      event_logger_ = reference_system::events::make_component_event_logger(settings.node_name);
-    }
     subscription_ = this->create_subscription<message_t>(
       settings.input_topic, 10,
       [this](const message_t::SharedPtr msg) {input_callback(msg);});
@@ -60,15 +50,48 @@ private:
     uint32_t missed_samples = get_missed_samples_and_update_seq_nr(input_message, sequence_number_);
     uint32_t sink_sequence = sink_sequence_number_++;
 
-    const std::string node_name = this->get_name();
-    const auto nodes = build_node_map(input_message);
-    const auto lineage_names = extract_lineage(input_message);
-    const auto lineage_ids = event_lineage(nodes);
-    const auto source_candidates = find_source_identities(nodes, source_candidate_names_);
+    uint64_t sink_timestamp = now_as_int();
 
-    const std::optional<source_identity_t> intersection_source =
-      find_source_identity(nodes, configured_source_name_);
-    const bool intersection_lineage_valid = validate_intersection_lineage(nodes);
+    if (is_structured_output_enabled()) {
+      std::string node_name = this->get_name();
+      auto nodes = build_node_map(input_message);
+      std::vector<std::string> lineage = extract_lineage(input_message);
+      lineage.push_back(node_name);
+
+      if (node_name == "VehicleDBWSystem" && validate_dbw_lineage(nodes)) {
+        static const std::vector<std::string> lidar_sources{
+          "FrontLidarDriver", "RearLidarDriver"};
+        const auto roots = extract_source_roots(input_message, lidar_sources);
+        auto src_id = select_source_reference(roots, true);
+        if (!src_id.node_name.empty()) {
+          uint64_t latency;
+          if (elapsed_ns(src_id.timestamp, sink_timestamp, latency)) {
+            uint32_t drops = sum_drops(input_message, nodes) + missed_samples;
+            emit_structured_chain_record(
+              "perception_localization_planning_control_to_dbw",
+              src_id.node_name, src_id.sequence_number, src_id.timestamp,
+              node_name, sink_sequence, sink_timestamp,
+              latency, lineage, roots, deadline_status(latency, 1000000000ULL), drops);
+          }
+        }
+      } else if (node_name == "IntersectionOutput" && validate_intersection_lineage(nodes)) {
+        auto it = nodes.find("EuclideanClusterSettings");
+        if (it != nodes.end()) {
+          uint64_t src_ts = it->second.timestamp;
+          uint64_t latency;
+          if (elapsed_ns(src_ts, sink_timestamp, latency)) {
+            uint32_t drops = sum_drops(input_message, nodes) + missed_samples;
+            const std::vector<source_identity_t> roots{{
+                "EuclideanClusterSettings", it->second.sequence_number, src_ts}};
+            emit_structured_chain_record(
+              "euclidean_settings_to_intersection_output",
+              "EuclideanClusterSettings", it->second.sequence_number, src_ts,
+              node_name, sink_sequence, sink_timestamp,
+              latency, lineage, roots, deadline_status(latency, 250000000ULL), drops);
+          }
+        }
+      }
+    }
 
     if (is_legacy_verbose_output_enabled()) {
       print_sample_path(this->get_name(), missed_samples, input_message);
@@ -79,67 +102,12 @@ private:
       "Command", this->get_name(),
       (c2.tv_sec - c1.tv_sec) * 1000000 + (c2.tv_usec - c1.tv_usec));
 
-    if (node_name == "VehicleDBWSystem") {
-      if (event_logger_) {
-        const auto earliest = oldest_source(input_message, source_candidate_names_);
-        event_logger_->sink_finish(
-          chain_id_,
-          earliest ? std::optional<reference_system::events::SourceExecutionId>{
-            to_event_source_id(*earliest)} : std::nullopt,
-          sink_sequence,
-          to_event_source_ids(source_candidates),
-          lineage_ids,
-          earliest ? "" : "earliest_source_missing",
-          "earliest_contributor",
-          event_input_lineage(input_message));
-      }
-    } else if (node_name == "IntersectionOutput") {
-      const uint64_t legacy_sink_timestamp = now_as_int();
-      if (is_structured_output_enabled() && intersection_source && intersection_lineage_valid)
-      {
-        uint64_t latency = 0;
-        if (elapsed_ns(intersection_source->timestamp, legacy_sink_timestamp, latency)) {
-          const std::vector<source_identity_t> roots{*intersection_source};
-          const uint32_t drops = sum_drops(input_message, nodes) + missed_samples;
-          std::vector<std::string> lineage = lineage_names;
-          lineage.push_back(node_name);
-          emit_structured_chain_record(
-            "euclidean_settings_to_intersection_output",
-            intersection_source->node_name, intersection_source->sequence_number,
-            intersection_source->timestamp,
-            node_name, sink_sequence, legacy_sink_timestamp,
-            latency, lineage, roots, deadline_status(latency, 250000000ULL), drops);
-        }
-      }
-
-      if (event_logger_) {
-        const std::optional<reference_system::events::SourceExecutionId> source_id =
-          intersection_source && intersection_lineage_valid ?
-          std::optional<reference_system::events::SourceExecutionId>{
-            to_event_source_id(*intersection_source)} : std::nullopt;
-        const std::string lineage_error = !intersection_source ?
-          "configured_source_missing:EuclideanClusterSettings" :
-          !intersection_lineage_valid ? "chain_lineage_invalid" : "";
-        event_logger_->sink_finish(
-          chain_id_,
-          source_id,
-          sink_sequence,
-          intersection_source ? to_event_source_ids({*intersection_source}) :
-          std::vector<reference_system::events::SourceExecutionId>{},
-          lineage_ids,
-          lineage_error);
-      }
-    }
   }
 
 private:
   rclcpp::Subscription<message_t>::SharedPtr subscription_;
-  std::string chain_id_;
-  std::vector<std::string> source_candidate_names_;
-  std::string configured_source_name_;
   uint32_t sequence_number_ = 0;
   uint32_t sink_sequence_number_ = 0;
-  std::unique_ptr<reference_system::events::ComponentEventLogger> event_logger_;
 };
 }  // namespace rclcpp_system
 }  // namespace nodes
