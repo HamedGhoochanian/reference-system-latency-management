@@ -22,6 +22,7 @@
 #include "reference_system/nodes/settings.hpp"
 #include "reference_system/sample_management.hpp"
 #include "reference_system/msg_types.hpp"
+#include "reference_system/provenance.hpp"
 
 namespace nodes
 {
@@ -32,7 +33,7 @@ class Sensor : public rclcpp::Node
 {
 public:
   explicit Sensor(const SensorSettings & settings)
-  : Node(settings.node_name)
+  : Node(settings.node_name), source_kind_(settings.source_kind)
   {
     publisher_ = this->create_publisher<message_t>(settings.topic_name, 1);
     timer_ = this->create_wall_timer(
@@ -48,22 +49,18 @@ private:
   void timer_callback()
   {
     gettimeofday(&c1, NULL);
-    uint64_t timestamp = now_as_int();
+    uint64_t timestamp = provenance_now_ns();
     auto message = publisher_->borrow_loaned_message();
     message.get().size = 0;
 
     uint32_t sequence = sequence_number_++;
     set_sample(this->get_name(), sequence, 0, timestamp, message.get());
+    const auto kind = source_kind_;
+    const provenance_source_t source{kind, sequence, timestamp};
+    set_provenance(message.get(), this->get_name(), sequence, 0, source);
+    if (kind != 0) emit_provenance_source(this->get_name(), sequence, kind, timestamp);
 
     publisher_->publish(std::move(message));
-    if (is_structured_output_enabled()) {
-      std::string node_name = this->get_name();
-      if (node_name == "FrontLidarDriver" || node_name == "RearLidarDriver" ||
-        node_name == "EuclideanClusterSettings")
-      {
-        emit_structured_source_record(node_name, sequence, timestamp);
-      }
-    }
     gettimeofday(&c2, NULL);
     print_execution_time(
       "Sensor", this->get_name(),
@@ -71,6 +68,7 @@ private:
   }
 
 private:
+  uint32_t source_kind_;
   rclcpp::Publisher<message_t>::SharedPtr publisher_;
   rclcpp::TimerBase::SharedPtr timer_;
   uint32_t sequence_number_ = 0;

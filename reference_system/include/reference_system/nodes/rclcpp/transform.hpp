@@ -23,6 +23,7 @@
 #include "reference_system/number_cruncher.hpp"
 #include "reference_system/sample_management.hpp"
 #include "reference_system/msg_types.hpp"
+#include "reference_system/provenance.hpp"
 
 namespace nodes
 {
@@ -49,7 +50,7 @@ private:
   struct timeval c1, c2;
   void input_callback(const message_t::SharedPtr input_message)
   {
-    uint64_t timestamp = now_as_int();
+    uint64_t timestamp = provenance_now_ns();
     auto number_cruncher_result = number_cruncher(number_crunch_limit_);
     gettimeofday(&c1, NULL);
     auto output_message = publisher_->borrow_loaned_message();
@@ -64,34 +65,15 @@ private:
       this->get_name(), sequence_number_++, missed_samples, timestamp,
       output_message.get());
 
-    uint64_t sink_timestamp = now_as_int();
-
-    std::string node_name = this->get_name();
-    if (is_structured_output_enabled() && node_name == "ObjectCollisionEstimator") {
-      auto nodes = build_node_map(&output_message.get());
-      if (validate_hot_path_lineage(nodes)) {
-        static const std::vector<std::string> lidar_sources{
-          "FrontLidarDriver", "RearLidarDriver"};
-        const auto roots = extract_source_roots(&output_message.get(), lidar_sources);
-        auto src_id = select_source_reference(roots, false);
-        if (!src_id.node_name.empty()) {
-          uint64_t latency;
-          if (elapsed_ns(src_id.timestamp, sink_timestamp, latency)) {
-            uint32_t drops = sum_drops(&output_message.get(), nodes);
-            std::vector<std::string> lineage = extract_lineage(&output_message.get());
-            emit_structured_chain_record(
-              "perception_collision_hot_path",
-              src_id.node_name, src_id.sequence_number, src_id.timestamp,
-              node_name, sequence_number_ - 1, sink_timestamp,
-              latency, lineage, roots, deadline_status(latency, 500000000ULL), drops);
-          }
-        }
-      }
-    }
-
     // use result so that it is not optimizied away by some clever compiler
     output_message.get().data[0] = number_cruncher_result;
+    const uint32_t output_sequence = sequence_number_ - 1;
+    const auto source = provenance_source(*input_message);
+    set_provenance(output_message.get(), this->get_name(), output_sequence, 0, source);
     publisher_->publish(std::move(output_message));
+    emit_provenance_link(
+      this->get_name(), output_sequence, 0, provenance_now_ns(),
+      {{0, provenance_identity(*input_message)}}, source, false);
     gettimeofday(&c2, NULL);
     print_execution_time(
       "Transform", this->get_name(),

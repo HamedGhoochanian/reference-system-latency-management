@@ -8,7 +8,13 @@ module reference_interfaces {
     struct Message4kb {
       uint64 size;                 //   8
       reference_interfaces::msg::TransmissionStats stats[63]; // + 4032 = 63 * 64
-      int64 data[7];               // + 56  = 7 * 8
+      int64 data[7];               // Original payload: 4096 bytes; provenance adds metadata below
+      string<48> provenance_node;
+      uint32 provenance_sequence;
+      uint32 provenance_channel;
+      uint32 source_kind;
+      uint32 source_sequence;
+      uint64 source_timestamp_ns;
                                    //-----------------
                                    // 4096
     };

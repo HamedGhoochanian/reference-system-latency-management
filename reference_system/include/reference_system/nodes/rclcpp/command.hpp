@@ -22,6 +22,7 @@
 #include "reference_system/nodes/settings.hpp"
 #include "reference_system/sample_management.hpp"
 #include "reference_system/msg_types.hpp"
+#include "reference_system/provenance.hpp"
 
 namespace nodes
 {
@@ -50,48 +51,8 @@ private:
     uint32_t missed_samples = get_missed_samples_and_update_seq_nr(input_message, sequence_number_);
     uint32_t sink_sequence = sink_sequence_number_++;
 
-    uint64_t sink_timestamp = now_as_int();
-
-    if (is_structured_output_enabled()) {
-      std::string node_name = this->get_name();
-      auto nodes = build_node_map(input_message);
-      std::vector<std::string> lineage = extract_lineage(input_message);
-      lineage.push_back(node_name);
-
-      if (node_name == "VehicleDBWSystem" && validate_dbw_lineage(nodes)) {
-        static const std::vector<std::string> lidar_sources{
-          "FrontLidarDriver", "RearLidarDriver"};
-        const auto roots = extract_source_roots(input_message, lidar_sources);
-        auto src_id = select_source_reference(roots, true);
-        if (!src_id.node_name.empty()) {
-          uint64_t latency;
-          if (elapsed_ns(src_id.timestamp, sink_timestamp, latency)) {
-            uint32_t drops = sum_drops(input_message, nodes) + missed_samples;
-            emit_structured_chain_record(
-              "perception_localization_planning_control_to_dbw",
-              src_id.node_name, src_id.sequence_number, src_id.timestamp,
-              node_name, sink_sequence, sink_timestamp,
-              latency, lineage, roots, deadline_status(latency, 1000000000ULL), drops);
-          }
-        }
-      } else if (node_name == "IntersectionOutput" && validate_intersection_lineage(nodes)) {
-        auto it = nodes.find("EuclideanClusterSettings");
-        if (it != nodes.end()) {
-          uint64_t src_ts = it->second.timestamp;
-          uint64_t latency;
-          if (elapsed_ns(src_ts, sink_timestamp, latency)) {
-            uint32_t drops = sum_drops(input_message, nodes) + missed_samples;
-            const std::vector<source_identity_t> roots{{
-                "EuclideanClusterSettings", it->second.sequence_number, src_ts}};
-            emit_structured_chain_record(
-              "euclidean_settings_to_intersection_output",
-              "EuclideanClusterSettings", it->second.sequence_number, src_ts,
-              node_name, sink_sequence, sink_timestamp,
-              latency, lineage, roots, deadline_status(latency, 250000000ULL), drops);
-          }
-        }
-      }
-    }
+    const auto input = provenance_identity(*input_message);
+    const auto source = provenance_source(*input_message);
 
     if (is_legacy_verbose_output_enabled()) {
       print_sample_path(this->get_name(), missed_samples, input_message);
@@ -101,6 +62,8 @@ private:
     print_execution_time(
       "Command", this->get_name(),
       (c2.tv_sec - c1.tv_sec) * 1000000 + (c2.tv_usec - c1.tv_usec));
+    emit_provenance_sink(
+      this->get_name(), sink_sequence, provenance_now_ns(), input, source);
 
   }
 

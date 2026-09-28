@@ -23,6 +23,7 @@
 #include "reference_system/number_cruncher.hpp"
 #include "reference_system/sample_management.hpp"
 #include "reference_system/msg_types.hpp"
+#include "reference_system/provenance.hpp"
 
 namespace nodes
 {
@@ -57,7 +58,7 @@ private:
     const message_t::SharedPtr input_message)
   {
     gettimeofday(&c1, NULL);
-    uint64_t timestamp = now_as_int();
+    uint64_t timestamp = provenance_now_ns();
     subscriptions_[input_number].cache = input_message;
     gettimeofday(&c2, NULL);
     if (input_number != 0) {
@@ -93,7 +94,16 @@ private:
       output_message.get());
 
     output_message.get().data[0] = number_cruncher_result;
+    const uint32_t output_sequence = sequence_number_ - 1;
+    const auto source = oldest_provenance_source({
+        provenance_source(*subscriptions_[0].cache),
+        provenance_source(*subscriptions_[1].cache)});
+    set_provenance(output_message.get(), this->get_name(), output_sequence, 0, source);
     publisher_->publish(std::move(output_message));
+    emit_provenance_link(
+      this->get_name(), output_sequence, 0, provenance_now_ns(),
+      {{0, provenance_identity(*subscriptions_[0].cache)},
+        {1, provenance_identity(*subscriptions_[1].cache)}}, source, false);
     gettimeofday(&c4, NULL);
     print_execution_time(
       "Fusion", std::string(this->get_name()) + " Trigger",

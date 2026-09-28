@@ -93,6 +93,7 @@ struct SensorSettings
   std::string node_name;
   std::string topic_name;
   std::chrono::nanoseconds cycle_time;
+  uint32_t source_kind = 0;
 #ifdef PICAS
   int callback_priority;
 #endif

@@ -24,6 +24,7 @@
 #include "reference_system/number_cruncher.hpp"
 #include "reference_system/sample_management.hpp"
 #include "reference_system/msg_types.hpp"
+#include "reference_system/provenance.hpp"
 
 namespace nodes
 {
@@ -58,7 +59,7 @@ private:
   struct timeval c1, c2;
   void input_callback(const message_t::SharedPtr input_message, const uint64_t id)
   {
-    uint64_t timestamp = now_as_int();
+    uint64_t timestamp = provenance_now_ns();
     auto number_cruncher_result = number_cruncher(connections_[id].number_crunch_limit);
     gettimeofday(&c1, NULL);
     auto output_message = connections_[id].publisher->borrow_loaned_message();
@@ -69,13 +70,18 @@ private:
       input_message,
       connections_[id].input_sequence_number);
 
-    set_sample(
-      this->get_name(), connections_[id].sequence_number++, missed_samples, timestamp,
-      output_message.get());
+    const uint32_t output_sequence = connections_[id].sequence_number++;
+    set_sample(this->get_name(), output_sequence, missed_samples, timestamp, output_message.get());
 
     // use result so that it is not optimizied away by some clever compiler
     output_message.get().data[0] = number_cruncher_result;
+    const auto source = provenance_source(*input_message);
+    set_provenance(output_message.get(), this->get_name(), output_sequence,
+      static_cast<uint32_t>(id), source);
     connections_[id].publisher->publish(std::move(output_message));
+    emit_provenance_link(
+      this->get_name(), output_sequence, static_cast<uint32_t>(id), provenance_now_ns(),
+      {{0, provenance_identity(*input_message)}}, source, false);
     gettimeofday(&c2, NULL);
     print_execution_time(
       "Intersection", this->get_name(),

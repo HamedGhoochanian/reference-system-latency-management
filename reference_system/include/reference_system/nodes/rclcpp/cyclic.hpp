@@ -24,6 +24,7 @@
 #include "reference_system/number_cruncher.hpp"
 #include "reference_system/sample_management.hpp"
 #include "reference_system/msg_types.hpp"
+#include "reference_system/provenance.hpp"
 
 namespace nodes
 {
@@ -78,13 +79,20 @@ private:
 
   void timer_callback()
   {
-    uint64_t timestamp = now_as_int();
+    uint64_t timestamp = provenance_now_ns();
     auto number_cruncher_result = number_cruncher(number_crunch_limit_);
     gettimeofday(&c1, NULL);
     auto output_message = publisher_->borrow_loaned_message();
     output_message.get().size = 0;
 
     uint32_t missed_samples = 0;
+    std::vector<std::pair<uint32_t, provenance_message_t>> inputs;
+    std::vector<provenance_source_t> sources;
+    for (size_t i = 0; i < subscriptions_.size(); ++i) {
+      if (!subscriptions_[i].cache) continue;
+      inputs.emplace_back(static_cast<uint32_t>(i), provenance_identity(*subscriptions_[i].cache));
+      sources.push_back(provenance_source(*subscriptions_[i].cache));
+    }
     for (auto & s : subscriptions_) {
       if (!s.cache) {continue;}
 
@@ -97,37 +105,13 @@ private:
       this->get_name(), sequence_number_++, missed_samples, timestamp,
       output_message.get());
 
-    bool has_period = false;
-    uint64_t period_ns = 0;
-    bool violated = false;
-    if (is_structured_output_enabled() && previous_timestamp_ != 0) {
-      uint64_t elapsed;
-      if (elapsed_ns(previous_timestamp_, timestamp, elapsed)) {
-        period_ns = elapsed / std::max(sequence_number_ - 1 - previous_sequence_, 1U);
-        double period_ms = static_cast<double>(period_ns) / 1000000.0;
-        violated = std::abs(period_ms - 100.0) > 10.0;
-        has_period = true;
-      }
-    }
-    previous_timestamp_ = timestamp;
-    previous_sequence_ = sequence_number_ - 1;
-
     output_message.get().data[0] = number_cruncher_result;
+    const uint32_t output_sequence = sequence_number_ - 1;
+    const auto source = oldest_provenance_source(sources);
+    set_provenance(output_message.get(), this->get_name(), output_sequence, 0, source);
     publisher_->publish(std::move(output_message));
-    uint64_t sink_timestamp = now_as_int();
-    if (is_structured_output_enabled()) {
-      emit_structured_source_record(this->get_name(), sequence_number_ - 1, timestamp);
-      if (has_period) {
-        std::vector<std::string> lineage{this->get_name()};
-        emit_structured_chain_record(
-          "behavior_planner_cyclic_jitter",
-          this->get_name(), sequence_number_ - 1, timestamp,
-          this->get_name(), sequence_number_ - 1, sink_timestamp,
-          period_ns, lineage,
-          std::vector<source_identity_t>{{this->get_name(), sequence_number_ - 1, timestamp}},
-          violated ? "violated" : "completed", 0);
-      }
-    }
+    emit_provenance_link(
+      this->get_name(), output_sequence, 0, provenance_now_ns(), inputs, source, true);
     gettimeofday(&c2, NULL);
     print_execution_time(
       "Cyclic", std::string(this->get_name()) + "Timer",
@@ -148,8 +132,6 @@ private:
   std::vector<subscription_t> subscriptions_;
   uint64_t number_crunch_limit_;
   uint32_t sequence_number_ = 0;
-  uint64_t previous_timestamp_ = 0;
-  uint32_t previous_sequence_ = 0;
 };
 }  // namespace rclcpp_system
 }  // namespace nodes

@@ -58,6 +58,7 @@ auto create_autoware_nodes(
         nodes::SensorSettings{.node_name = "FrontLidarDriver",
           .topic_name = "FrontLidarDriver",
           .cycle_time = input_period(TimingConfig::FRONT_LIDAR_DRIVER),
+          .source_kind = 1,
           #ifdef PICAS
           .callback_priority = CallbackPriority::FRONT_LIDAR_DRIVER_CALLBACK
           #endif
@@ -70,6 +71,7 @@ auto create_autoware_nodes(
         nodes::SensorSettings{.node_name = "RearLidarDriver",
           .topic_name = "RearLidarDriver",
           .cycle_time = input_period(TimingConfig::REAR_LIDAR_DRIVER),
+          .source_kind = 2,
           #ifdef PICAS
           .callback_priority = CallbackPriority::REAR_LIDAR_DRIVER_CALLBACK
           #endif
@@ -82,6 +84,7 @@ auto create_autoware_nodes(
         nodes::SensorSettings{.node_name = "PointCloudMap",
           .topic_name = "PointCloudMap",
           .cycle_time = input_period(TimingConfig::POINT_CLOUD_MAP),
+          .source_kind = 3,
           #ifdef PICAS
           .callback_priority = CallbackPriority::POINT_CLOUD_MAP_CALLBACK
           #endif
@@ -94,6 +97,7 @@ auto create_autoware_nodes(
         nodes::SensorSettings{.node_name = "Visualizer",
           .topic_name = "Visualizer",
           .cycle_time = input_period(TimingConfig::VISUALIZER),
+          .source_kind = 4,
           #ifdef PICAS
           .callback_priority = CallbackPriority::VISUALIZER_CALLBACK
           #endif
@@ -106,6 +110,7 @@ auto create_autoware_nodes(
         nodes::SensorSettings{.node_name = "Lanelet2Map",
           .topic_name = "Lanelet2Map",
           .cycle_time = input_period(TimingConfig::LANELET2MAP),
+          .source_kind = 5,
           #ifdef PICAS
           .callback_priority = CallbackPriority::LANELET_2_MAP_CALLBACK
           #endif
@@ -118,6 +123,7 @@ auto create_autoware_nodes(
         nodes::SensorSettings{.node_name = "EuclideanClusterSettings",
           .topic_name = "EuclideanClusterSettings",
           .cycle_time = input_period(TimingConfig::EUCLIDEAN_CLUSTER_SETTINGS),
+          .source_kind = 6,
           #ifdef PICAS
           .callback_priority = CallbackPriority::EUCLIDEAN_CLUSTER_SETTINGS_CALLBACK
           #endif
