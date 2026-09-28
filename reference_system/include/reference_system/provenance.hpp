@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "reference_system/msg_types.hpp"
+#include "reference_system/sample_management.hpp"
 
 struct provenance_source_t
 {
@@ -82,6 +83,7 @@ inline provenance_message_t provenance_identity(const message_t & message)
 
 inline void write_provenance_record(const std::string & record)
 {
+  if (!is_structured_output_enabled()) return;
   static std::mutex mutex;
   std::lock_guard<std::mutex> lock(mutex);
   std::cout << record << std::endl;
