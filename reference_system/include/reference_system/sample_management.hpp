@@ -29,12 +29,7 @@
 #include <unistd.h>
 
 #include "reference_system/msg_types.hpp"
-
-inline std::mutex & reference_system_cout_mutex()
-{
-  static std::mutex mutex;
-  return mutex;
-}
+#include "reference_system/stdout_mutex.hpp"
 
 template<typename DurationT>
 void print_execution_time(

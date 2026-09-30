@@ -24,6 +24,7 @@
 
 #include "reference_system/msg_types.hpp"
 #include "reference_system/sample_management.hpp"
+#include "reference_system/tracking.hpp"
 
 struct provenance_source_t
 {
@@ -84,9 +85,29 @@ inline provenance_message_t provenance_identity(const message_t & message)
 inline void write_provenance_record(const std::string & record)
 {
   if (!is_structured_output_enabled()) return;
-  static std::mutex mutex;
-  std::lock_guard<std::mutex> lock(mutex);
-  std::cout << record << std::endl;
+  reference_system_write_stdout_line(record);
+}
+
+inline void write_provenance_record(
+  const std::string & record, const std::string & producer, uint64_t timestamp_ns)
+{
+  if (!is_structured_output_enabled()) return;
+  if (reference_system_tracking::enabled()) {
+    reference_system_tracking::runtime().writer().write_event(producer, timestamp_ns, record);
+    return;
+  }
+  write_provenance_record(record);
+}
+
+inline void register_provenance_producer(const std::string & producer)
+{
+  reference_system_tracking::register_producer(producer);
+}
+
+inline reference_system_tracking::TrackingWriter::Callback provenance_callback_guard(
+  const std::string & producer)
+{
+  return reference_system_tracking::begin_callback(producer);
 }
 
 inline std::string provenance_source_json(const provenance_source_t & source)
@@ -103,7 +124,7 @@ inline void emit_provenance_source(
   write_provenance_record(
     "{\"schema\":1,\"event\":\"source\",\"t_ns\":" +
     std::to_string(timestamp_ns) + ",\"node\":\"" + node + "\",\"seq\":" +
-    std::to_string(sequence) + ",\"kind\":" + std::to_string(kind) + "}");
+    std::to_string(sequence) + ",\"kind\":" + std::to_string(kind) + "}", node, timestamp_ns);
 }
 
 inline void emit_provenance_link(
@@ -124,7 +145,7 @@ inline void emit_provenance_link(
   }
   record += "],\"source\":" + provenance_source_json(source) +
     ",\"timer\":" + std::string(timer ? "true" : "false") + "}";
-  write_provenance_record(record);
+  write_provenance_record(record, node, timestamp_ns);
 }
 
 inline void emit_provenance_sink(
@@ -138,7 +159,7 @@ inline void emit_provenance_sink(
     ",\"channel\":0},\"input\":{\"name\":\"" + input.name + "\",\"seq\":" +
     std::to_string(input.sequence) + ",\"channel\":" + std::to_string(input.channel) +
     "},\"source\":" + provenance_source_json(source) +
-    ",\"sensor_started\":" + std::string(source.valid() ? "true" : "false") + "}");
+    ",\"sensor_started\":" + std::string(source.valid() ? "true" : "false") + "}", node, timestamp_ns);
 }
 
 #endif  // REFERENCE_SYSTEM__PROVENANCE_HPP_

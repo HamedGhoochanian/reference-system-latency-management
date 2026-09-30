@@ -37,6 +37,7 @@ public:
   : Node(settings.node_name),
     number_crunch_limit_(settings.number_crunch_limit)
   {
+    register_provenance_producer(this->get_name());
     subscriptions_[0].subscription = this->create_subscription<message_t>(
       settings.input_0, 1,
       [this](const message_t::SharedPtr msg) {input_callback(0U, msg);});
@@ -57,6 +58,7 @@ private:
     const uint64_t input_number,
     const message_t::SharedPtr input_message)
   {
+    auto tracking_callback = provenance_callback_guard(this->get_name());
     gettimeofday(&c1, NULL);
     uint64_t timestamp = provenance_now_ns();
     subscriptions_[input_number].cache = input_message;

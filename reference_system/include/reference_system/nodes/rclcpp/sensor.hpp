@@ -35,6 +35,7 @@ public:
   explicit Sensor(const SensorSettings & settings)
   : Node(settings.node_name), source_kind_(settings.source_kind)
   {
+    register_provenance_producer(this->get_name());
     publisher_ = this->create_publisher<message_t>(settings.topic_name, 1);
     timer_ = this->create_wall_timer(
       settings.cycle_time,
@@ -48,6 +49,7 @@ private:
   struct timeval c1, c2;
   void timer_callback()
   {
+    auto tracking_callback = provenance_callback_guard(this->get_name());
     gettimeofday(&c1, NULL);
     uint64_t timestamp = provenance_now_ns();
     auto message = publisher_->borrow_loaned_message();

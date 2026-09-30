@@ -38,6 +38,7 @@ public:
   : Node(settings.node_name),
     number_crunch_limit_(settings.number_crunch_limit)
   {
+    register_provenance_producer(this->get_name());
     uint64_t input_number = 0U;
     for (const auto & input_topic : settings.inputs) {
       subscriptions_.emplace_back(
@@ -79,6 +80,7 @@ private:
 
   void timer_callback()
   {
+    auto tracking_callback = provenance_callback_guard(this->get_name());
     uint64_t timestamp = provenance_now_ns();
     auto number_cruncher_result = number_cruncher(number_crunch_limit_);
     gettimeofday(&c1, NULL);

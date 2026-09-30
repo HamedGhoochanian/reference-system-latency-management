@@ -37,6 +37,7 @@ public:
   : Node(settings.node_name),
     number_crunch_limit_(settings.number_crunch_limit)
   {
+    register_provenance_producer(this->get_name());
     subscription_ = this->create_subscription<message_t>(
       settings.input_topic, 1,
       [this](const message_t::SharedPtr msg) {input_callback(msg);});
@@ -50,6 +51,7 @@ private:
   struct timeval c1, c2;
   void input_callback(const message_t::SharedPtr input_message)
   {
+    auto tracking_callback = provenance_callback_guard(this->get_name());
     uint64_t timestamp = provenance_now_ns();
     auto number_cruncher_result = number_cruncher(number_crunch_limit_);
     gettimeofday(&c1, NULL);

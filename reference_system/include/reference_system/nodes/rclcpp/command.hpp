@@ -35,6 +35,7 @@ public:
   explicit Command(const CommandSettings & settings)
   : Node(settings.node_name)
   {
+    register_provenance_producer(this->get_name());
     subscription_ = this->create_subscription<message_t>(
       settings.input_topic, 10,
       [this](const message_t::SharedPtr msg) {input_callback(msg);});
@@ -47,6 +48,7 @@ private:
   struct timeval c1, c2;
   void input_callback(const message_t::SharedPtr input_message)
   {
+    auto tracking_callback = provenance_callback_guard(this->get_name());
     gettimeofday(&c1, NULL);
     uint32_t missed_samples = get_missed_samples_and_update_seq_nr(input_message, sequence_number_);
     uint32_t sink_sequence = sink_sequence_number_++;
