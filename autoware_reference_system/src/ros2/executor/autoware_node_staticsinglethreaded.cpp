@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -69,6 +70,35 @@ double input_period_scale()
   return scale;
 }
 
+bool is_source_node(const std::string & node_name)
+{
+  return node_name == "FrontLidarDriver" || node_name == "RearLidarDriver" ||
+         node_name == "PointCloudMap" || node_name == "Visualizer" ||
+         node_name == "Lanelet2Map" || node_name == "EuclideanClusterSettings";
+}
+
+std::optional<std::chrono::nanoseconds> source_period(const std::string & node_name)
+{
+  const char * value = std::getenv("LAME_SOURCE_PERIOD_NS");
+  if (value == nullptr) {
+    return std::nullopt;
+  }
+  if (std::getenv("LAME_INPUT_PERIOD_SCALE") != nullptr) {
+    throw std::invalid_argument{
+            "LAME_SOURCE_PERIOD_NS conflicts with LAME_INPUT_PERIOD_SCALE"};
+  }
+  if (!is_source_node(node_name)) {
+    throw std::invalid_argument{"LAME_SOURCE_PERIOD_NS is valid only for source nodes"};
+  }
+  char * end = nullptr;
+  errno = 0;
+  const long long period_ns = std::strtoll(value, &end, 10);
+  if (errno != 0 || end == value || *end != '\0' || period_ns <= 0) {
+    throw std::invalid_argument{"LAME_SOURCE_PERIOD_NS must be a positive integer"};
+  }
+  return std::chrono::nanoseconds{period_ns};
+}
+
 bool structured_output_enabled()
 {
   const char * value = std::getenv("LAME_STRUCTURED_OUTPUT");
@@ -97,7 +127,9 @@ int main(int argc, char * argv[])
   }
 
   double period_scale;
+  std::optional<std::chrono::nanoseconds> source_period_ns;
   try {
+    source_period_ns = source_period(node_name);
     period_scale = input_period_scale();
     set_structured_output_enabled(structured_output_enabled());
   } catch (const std::invalid_argument & error) {
@@ -108,7 +140,8 @@ int main(int argc, char * argv[])
   rclcpp::init(argc, argv);
 
   using TimeConfig = nodes::timing::Default;
-  auto nodes = create_autoware_nodes<RclcppSystem, TimeConfig>({node_name}, period_scale);
+  auto nodes = create_autoware_nodes<RclcppSystem, TimeConfig>(
+    {node_name}, period_scale, source_period_ns);
 
   rclcpp::executors::StaticSingleThreadedExecutor executor;
   for (auto & node : nodes) {

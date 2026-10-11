@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -32,7 +33,8 @@ using CallbackPriority = callback::priority::Default;
 template<typename SystemType, typename TimingConfig>
 auto create_autoware_nodes(
   const std::vector<std::string> & selected_node_names = {},
-  const double input_period_scale = 1.0)
+  const double input_period_scale = 1.0,
+  const std::optional<std::chrono::nanoseconds> source_period = std::nullopt)
 ->std::vector<std::shared_ptr<typename SystemType::NodeBaseType>>
 {
   std::vector<std::shared_ptr<typename SystemType::NodeBaseType>> nodes;
@@ -40,7 +42,10 @@ auto create_autoware_nodes(
     return selected_node_names.empty() || std::find(
       selected_node_names.begin(), selected_node_names.end(), node_name) != selected_node_names.end();
   };
-  const auto input_period = [input_period_scale](const auto period) {
+  const auto input_period = [input_period_scale, source_period](const auto period) {
+    if (source_period.has_value()) {
+      return *source_period;
+    }
     return std::chrono::nanoseconds{
       static_cast<std::chrono::nanoseconds::rep>(period.count() * input_period_scale)};
   };

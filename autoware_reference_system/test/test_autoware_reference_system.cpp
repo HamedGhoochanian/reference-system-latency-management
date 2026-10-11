@@ -110,4 +110,13 @@ TEST_F(AutowareSystemBuilderTest, InputPeriodScaleChangesSensorPeriod)
   ASSERT_EQ(built_nodes.size(), 1U);
   EXPECT_EQ(built_nodes.front()->sensor_period, std::chrono::milliseconds{50});
 }
+
+TEST_F(AutowareSystemBuilderTest, ExplicitSourcePeriodOverridesScale)
+{
+  const auto built_nodes = create_autoware_nodes<TestSystem, nodes::timing::Default>(
+    {"FrontLidarDriver"}, 0.5, std::chrono::nanoseconds{50000001});
+
+  ASSERT_EQ(built_nodes.size(), 1U);
+  EXPECT_EQ(built_nodes.front()->sensor_period, std::chrono::nanoseconds{50000001});
+}
 }  // namespace
