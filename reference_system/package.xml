@@ -13,6 +13,7 @@
   <buildtool_depend>ament_cmake_auto</buildtool_depend>
 
   <depend>rclcpp</depend>
+  <depend>rcl</depend>
   <depend>reference_interfaces</depend>
   <depend>rcl_interfaces</depend>
 

@@ -29,6 +29,9 @@ if(${BUILD_TESTING})
   ament_add_gtest(test_sample_management test/test_sample_management.cpp)
   ament_target_dependencies(test_sample_management rclcpp reference_interfaces)
   target_link_libraries(test_sample_management ${PROJECT_NAME})
+  add_executable(test_source_schedule test/test_source_schedule.cpp)
+  target_link_libraries(test_source_schedule ${PROJECT_NAME})
+  add_test(NAME test_source_schedule COMMAND test_source_schedule)
 endif()
 
 # Install

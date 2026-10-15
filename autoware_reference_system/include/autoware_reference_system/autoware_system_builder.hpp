@@ -34,7 +34,8 @@ template<typename SystemType, typename TimingConfig>
 auto create_autoware_nodes(
   const std::vector<std::string> & selected_node_names = {},
   const double input_period_scale = 1.0,
-  const std::optional<std::chrono::nanoseconds> source_period = std::nullopt)
+  const std::optional<std::chrono::nanoseconds> source_period = std::nullopt,
+  const std::string & source_schedule_file = "")
 ->std::vector<std::shared_ptr<typename SystemType::NodeBaseType>>
 {
   std::vector<std::shared_ptr<typename SystemType::NodeBaseType>> nodes;
@@ -64,6 +65,7 @@ auto create_autoware_nodes(
           .topic_name = "FrontLidarDriver",
           .cycle_time = input_period(TimingConfig::FRONT_LIDAR_DRIVER),
           .source_kind = 1,
+          .source_schedule_file = source_schedule_file,
           #ifdef PICAS
           .callback_priority = CallbackPriority::FRONT_LIDAR_DRIVER_CALLBACK
           #endif
@@ -77,6 +79,7 @@ auto create_autoware_nodes(
           .topic_name = "RearLidarDriver",
           .cycle_time = input_period(TimingConfig::REAR_LIDAR_DRIVER),
           .source_kind = 2,
+          .source_schedule_file = source_schedule_file,
           #ifdef PICAS
           .callback_priority = CallbackPriority::REAR_LIDAR_DRIVER_CALLBACK
           #endif
@@ -90,6 +93,7 @@ auto create_autoware_nodes(
           .topic_name = "PointCloudMap",
           .cycle_time = input_period(TimingConfig::POINT_CLOUD_MAP),
           .source_kind = 3,
+          .source_schedule_file = source_schedule_file,
           #ifdef PICAS
           .callback_priority = CallbackPriority::POINT_CLOUD_MAP_CALLBACK
           #endif
@@ -103,6 +107,7 @@ auto create_autoware_nodes(
           .topic_name = "Visualizer",
           .cycle_time = input_period(TimingConfig::VISUALIZER),
           .source_kind = 4,
+          .source_schedule_file = source_schedule_file,
           #ifdef PICAS
           .callback_priority = CallbackPriority::VISUALIZER_CALLBACK
           #endif
@@ -116,6 +121,7 @@ auto create_autoware_nodes(
           .topic_name = "Lanelet2Map",
           .cycle_time = input_period(TimingConfig::LANELET2MAP),
           .source_kind = 5,
+          .source_schedule_file = source_schedule_file,
           #ifdef PICAS
           .callback_priority = CallbackPriority::LANELET_2_MAP_CALLBACK
           #endif
@@ -129,6 +135,7 @@ auto create_autoware_nodes(
           .topic_name = "EuclideanClusterSettings",
           .cycle_time = input_period(TimingConfig::EUCLIDEAN_CLUSTER_SETTINGS),
           .source_kind = 6,
+          .source_schedule_file = source_schedule_file,
           #ifdef PICAS
           .callback_priority = CallbackPriority::EUCLIDEAN_CLUSTER_SETTINGS_CALLBACK
           #endif

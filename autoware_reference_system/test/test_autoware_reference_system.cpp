@@ -34,6 +34,7 @@ struct TestNode
   {
     record(settings.node_name);
     sensor_period = settings.cycle_time;
+    source_schedule_file = settings.source_schedule_file;
   }
   explicit TestNode(const nodes::TransformSettings & settings) { record(settings.node_name); }
 
@@ -41,6 +42,7 @@ struct TestNode
 
   static std::vector<std::string> constructed_names;
   std::chrono::nanoseconds sensor_period{0};
+  std::string source_schedule_file;
 
 private:
   void record(const std::string & node_name)
@@ -118,5 +120,19 @@ TEST_F(AutowareSystemBuilderTest, ExplicitSourcePeriodOverridesScale)
 
   ASSERT_EQ(built_nodes.size(), 1U);
   EXPECT_EQ(built_nodes.front()->sensor_period, std::chrono::nanoseconds{50000001});
+}
+
+TEST_F(AutowareSystemBuilderTest, SourceScheduleReachesEverySelectedSource)
+{
+  const std::vector<std::string> selected{
+    "FrontLidarDriver", "RearLidarDriver", "PointCloudMap", "Visualizer",
+    "Lanelet2Map", "EuclideanClusterSettings"};
+  const auto built_nodes = create_autoware_nodes<TestSystem, nodes::timing::Default>(
+    selected, 1.0, std::chrono::milliseconds{100}, "/artifacts/control/synthetic.schedule");
+  ASSERT_EQ(built_nodes.size(), 6U);
+  for (const auto & node : built_nodes) {
+    EXPECT_EQ(node->source_schedule_file, "/artifacts/control/synthetic.schedule");
+    EXPECT_EQ(node->sensor_period, std::chrono::milliseconds{100});
+  }
 }
 }  // namespace

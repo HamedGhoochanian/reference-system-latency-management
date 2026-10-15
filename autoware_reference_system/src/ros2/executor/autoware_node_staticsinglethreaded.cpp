@@ -128,8 +128,15 @@ int main(int argc, char * argv[])
 
   double period_scale;
   std::optional<std::chrono::nanoseconds> source_period_ns;
+  std::string schedule_file;
   try {
     source_period_ns = source_period(node_name);
+    if (const char * path = std::getenv("LAME_SOURCE_SCHEDULE_FILE")) {
+      if (!is_source_node(node_name) || !source_period_ns || std::string(path).empty()) {
+        throw std::invalid_argument("source schedule requires source identity and explicit period");
+      }
+      schedule_file = path;
+    }
     period_scale = input_period_scale();
     set_structured_output_enabled(structured_output_enabled());
   } catch (const std::invalid_argument & error) {
@@ -141,7 +148,7 @@ int main(int argc, char * argv[])
 
   using TimeConfig = nodes::timing::Default;
   auto nodes = create_autoware_nodes<RclcppSystem, TimeConfig>(
-    {node_name}, period_scale, source_period_ns);
+    {node_name}, period_scale, source_period_ns, schedule_file);
 
   rclcpp::executors::StaticSingleThreadedExecutor executor;
   for (auto & node : nodes) {
