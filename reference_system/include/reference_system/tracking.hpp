@@ -572,10 +572,16 @@ inline std::string process_instance_id()
 class Runtime
 {
 public:
-  Runtime()
-  : writer_(read_boot_id(), process_instance_id(), [](const std::string & record) {
-      reference_system_write_stdout_line(record);
-    }, monotonic_now_ns, writer_mode_from_environment()) {}
+  explicit Runtime(WriterMode mode = writer_mode_from_environment())
+  : writer_(read_boot_id(), process_instance_id(), [mode](const std::string & record) {
+      if (mode == WriterMode::synchronous) {
+        reference_system_write_stdout_line(record);
+        return;
+      }
+      std::lock_guard<std::mutex> lock(reference_system_cout_mutex());
+      std::cout << record << std::endl;
+      if (!std::cout) {throw std::runtime_error("tracking stdout write or flush failed");}
+    }, monotonic_now_ns, mode) {}
   ~Runtime()
   {
     {
