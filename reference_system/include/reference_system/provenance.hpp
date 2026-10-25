@@ -99,6 +99,12 @@ inline void write_provenance_record(
   write_provenance_record(record);
 }
 
+inline reference_system_tracking::TrackingWriter * provenance_tracking_writer_if_enabled()
+{
+  if (!reference_system_tracking::enabled()) {return nullptr;}
+  return &reference_system_tracking::runtime().writer();
+}
+
 inline void register_provenance_producer(const std::string & producer)
 {
   reference_system_tracking::register_producer(producer);
@@ -121,10 +127,17 @@ inline std::string provenance_source_json(const provenance_source_t & source)
 inline void emit_provenance_source(
   const std::string & node, uint32_t sequence, uint32_t kind, uint64_t timestamp_ns)
 {
-  write_provenance_record(
-    "{\"schema\":1,\"event\":\"source\",\"t_ns\":" +
+  if (!is_structured_output_enabled()) return;
+  auto * writer = provenance_tracking_writer_if_enabled();
+  if (writer != nullptr && writer->mode() == reference_system_tracking::WriterMode::asynchronous) {
+    writer->write_source(node, sequence, kind, timestamp_ns);
+    return;
+  }
+  const std::string record = "{\"schema\":1,\"event\":\"source\",\"t_ns\":" +
     std::to_string(timestamp_ns) + ",\"node\":\"" + node + "\",\"seq\":" +
-    std::to_string(sequence) + ",\"kind\":" + std::to_string(kind) + "}", node, timestamp_ns);
+    std::to_string(sequence) + ",\"kind\":" + std::to_string(kind) + "}";
+  if (writer != nullptr) {writer->write_event(node, timestamp_ns, record);}
+  else {reference_system_write_stdout_line(record);}
 }
 
 inline void emit_provenance_link(
@@ -132,6 +145,12 @@ inline void emit_provenance_link(
   const std::vector<std::pair<uint32_t, provenance_message_t>> & inputs,
   const provenance_source_t & source, bool timer)
 {
+  if (!is_structured_output_enabled()) return;
+  auto * writer = provenance_tracking_writer_if_enabled();
+  if (writer != nullptr && writer->mode() == reference_system_tracking::WriterMode::asynchronous) {
+    writer->write_link(node, sequence, channel, timestamp_ns, inputs, source, timer);
+    return;
+  }
   std::string record = "{\"schema\":1,\"event\":\"link\",\"t_ns\":" +
     std::to_string(timestamp_ns) + ",\"node\":\"" + node + "\",\"msg\":{\"name\":\"" +
     node + "\",\"seq\":" + std::to_string(sequence) + ",\"channel\":" +
@@ -145,21 +164,29 @@ inline void emit_provenance_link(
   }
   record += "],\"source\":" + provenance_source_json(source) +
     ",\"timer\":" + std::string(timer ? "true" : "false") + "}";
-  write_provenance_record(record, node, timestamp_ns);
+  if (writer != nullptr) {writer->write_event(node, timestamp_ns, record);}
+  else {reference_system_write_stdout_line(record);}
 }
 
 inline void emit_provenance_sink(
   const std::string & node, uint32_t sequence, uint64_t timestamp_ns,
   const provenance_message_t & input, const provenance_source_t & source)
 {
-  write_provenance_record(
-    "{\"schema\":1,\"event\":\"sink\",\"t_ns\":" +
+  if (!is_structured_output_enabled()) return;
+  auto * writer = provenance_tracking_writer_if_enabled();
+  if (writer != nullptr && writer->mode() == reference_system_tracking::WriterMode::asynchronous) {
+    writer->write_sink(node, sequence, timestamp_ns, input, source);
+    return;
+  }
+  const std::string record = "{\"schema\":1,\"event\":\"sink\",\"t_ns\":" +
     std::to_string(timestamp_ns) + ",\"node\":\"" + node + "\",\"msg\":{\"name\":\"" +
     node + "\",\"seq\":" + std::to_string(sequence) +
     ",\"channel\":0},\"input\":{\"name\":\"" + input.name + "\",\"seq\":" +
     std::to_string(input.sequence) + ",\"channel\":" + std::to_string(input.channel) +
     "},\"source\":" + provenance_source_json(source) +
-    ",\"sensor_started\":" + std::string(source.valid() ? "true" : "false") + "}", node, timestamp_ns);
+    ",\"sensor_started\":" + std::string(source.valid() ? "true" : "false") + "}";
+  if (writer != nullptr) {writer->write_event(node, timestamp_ns, record);}
+  else {reference_system_write_stdout_line(record);}
 }
 
 #endif  // REFERENCE_SYSTEM__PROVENANCE_HPP_
