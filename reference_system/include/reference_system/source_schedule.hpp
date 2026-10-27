@@ -2,6 +2,7 @@
 // Private, versioned source-control files. No executor or timer replacement.
 #ifndef REFERENCE_SYSTEM__SOURCE_SCHEDULE_HPP_
 #define REFERENCE_SYSTEM__SOURCE_SCHEDULE_HPP_
+#include <charconv>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -9,9 +10,24 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace nodes {
+namespace source_schedule_detail {
+template<typename Integer>
+bool read_integer(std::istream & input, Integer & value)
+{
+  std::string token;
+  if (!(input >> token)) {return false;}
+  Integer parsed{};
+  const auto result = std::from_chars(token.data(), token.data() + token.size(), parsed);
+  if (result.ec != std::errc{} || result.ptr != token.data() + token.size()) {return false;}
+  value = parsed;
+  return true;
+}
+} // namespace source_schedule_detail
+
 class SourceSchedule {
 public:
   struct Phase {std::string id; int64_t offset; int64_t period;};
@@ -21,16 +37,20 @@ public:
     std::ifstream file(path);
     std::string magic, declared_source, declared_instance;
     size_t count = 0;
-    if (!(file >> magic >> session_ >> boot_ >> hash_ >> declared_source >> declared_instance >> duration_ >> count) ||
+    if (!(file >> magic >> session_ >> boot_ >> hash_ >> declared_source >> declared_instance) ||
+      !source_schedule_detail::read_integer(file, duration_) ||
+      !source_schedule_detail::read_integer(file, count) ||
       magic != "LAME_SOURCE_SCHEDULE_V1" || declared_source != source || boot_ != boot ||
-      declared_instance != instance || duration_ <= 0 || count != 3) {
+      declared_instance != instance || duration_ <= 0 || count == 0 || count > 64) {
       throw std::runtime_error("invalid or stale source schedule identity");
     }
     for (const auto & token : {session_, boot_, hash_, source, instance}) {check_token(token);}
+    phases_.reserve(count);
     std::set<std::string> ids;
     for (size_t i=0; i<count; ++i) {
       Phase phase{};
-      if (!(file >> phase.id >> phase.offset >> phase.period) || phase.period <= 0 ||
+      if (!(file >> phase.id) || !source_schedule_detail::read_integer(file, phase.offset) ||
+        !source_schedule_detail::read_integer(file, phase.period) || phase.period <= 0 ||
         phase.offset < 0 || phase.offset >= duration_ ||
         (i == 0 ? phase.offset != 0 : phase.offset <= phases_.back().offset) ||
         !ids.insert(phase.id).second) {throw std::runtime_error("invalid source schedule phase");}
@@ -38,8 +58,7 @@ public:
       phases_.push_back(phase);
     }
     std::string extra;
-    if ((file >> extra) || phases_.front().period != initial ||
-      phases_.front().period != phases_.back().period) {
+    if ((file >> extra) || phases_.front().period != initial) {
       throw std::runtime_error("source schedule periods or trailing content invalid");
     }
   }
@@ -50,7 +69,9 @@ public:
       std::ifstream start(start_path_);
       std::string magic, session, boot, hash, extra;
       int64_t epoch=0;
-      if (!(start >> magic >> session >> boot >> hash >> epoch) || (start >> extra) ||
+      if (!(start >> magic >> session >> boot >> hash) ||
+        !source_schedule_detail::read_integer(start, epoch) ||
+        (start >> extra) ||
         magic != "LAME_SOURCE_START_V1" || session != session_ || boot != boot_ || hash != hash_ ||
         epoch <= 0 || epoch > std::numeric_limits<int64_t>::max() - duration_) {
         throw std::runtime_error("invalid or stale source start record");
