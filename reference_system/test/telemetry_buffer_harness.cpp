@@ -21,6 +21,23 @@ int main(int argc, char ** argv)
   alignas(64) std::array<uint64_t, (header_bytes + record_size + 63) / 8> storage{};
   auto * bytes = reinterpret_cast<uint8_t *>(storage.data());
   const Identity identity{"run-A", "FrontLidarDriver", "boot-A", "instance-A"};
+  if (argc == 3 && std::string(argv[1]) == "--append") {
+    MappedBuffer shared(argv[2], identity);
+    RecordView event;
+    event.kind = Kind::source;
+    event.sequence = 0;
+    event.timestamp_ns = 100;
+    event.message_sequence = 0;
+    event.source_kind = 1;
+    assert(shared.writer().append(event) == AppendResult::written);
+    RecordView report;
+    report.kind = Kind::delivery;
+    report.sequence = 1;
+    report.timestamp_ns = 201;
+    report.through_ns = 200;
+    assert(shared.writer().append(report) == AppendResult::written);
+    return 0;
+  }
   assert(initialize(bytes, header_bytes + record_size, identity));
   MemoryWriter writer(bytes, header_bytes + record_size, identity);
   RecordView delivery{};
