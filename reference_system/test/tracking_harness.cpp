@@ -159,6 +159,36 @@ int main()
     stopped_callbacks = true;
   }
   assert(stopped_callbacks);
+  // Timing labels may differ from the registered provenance producer. Their
+  // auxiliary sequence is independent, and shutdown publishes only one final
+  // delivery for the registered producer (no new provenance sequence zero).
+  alignas(64) uint8_t aliased[reference_system_telemetry::header_bytes + 4096]{};
+  assert(reference_system_telemetry::initialize(aliased, sizeof(aliased), identity));
+  reference_system_telemetry::MemoryWriter aliased_buffer(aliased, sizeof(aliased), identity);
+  reference_system_tracking::TrackingWriter aliased_writer("boot-test", "instance-memory",
+    [](const std::string &) {assert(false);}, [] {return uint64_t(400);},
+    reference_system_tracking::WriterMode::memory,
+    reference_system_tracking::TrackingWriter::kDefaultQueueCapacity, &aliased_buffer);
+  aliased_writer.register_producer("Node");
+  aliased_writer.write_source("Node", 1, 1, 100);
+  reference_system_telemetry::RecordView alias_timing;
+  alias_timing.kind = reference_system_telemetry::Kind::timing;
+  alias_timing.timestamp_ns = 110;
+  alias_timing.name = "Fusion";
+  alias_timing.aux_name = "Node Trigger";
+  aliased_writer.write_auxiliary("Node", alias_timing);
+  aliased_writer.write_auxiliary("Node Trigger", alias_timing);
+  aliased_writer.write_auxiliary("NodeTimer", alias_timing);
+  aliased_writer.report_delivery("Node", 200);
+  aliased_writer.shutdown();
+  assert(reference_system_telemetry::shared_load(aliased, 704) == 6);
+  const auto * alias_record = aliased + reference_system_telemetry::header_bytes;
+  for (uint64_t seq : {uint64_t(0), uint64_t(0), uint64_t(1), uint64_t(2),
+    uint64_t(1), uint64_t(2)}) {
+    assert(reference_system_telemetry::get64(alias_record + 8) == seq);
+    alias_record += reference_system_telemetry::get32(alias_record);
+  }
+  assert(reference_system_telemetry::shutdown_complete(aliased) == 1);
   alignas(64) uint8_t small[reference_system_telemetry::header_bytes + 40]{};
   assert(reference_system_telemetry::initialize(small, sizeof(small), identity));
   reference_system_telemetry::MemoryWriter small_buffer(small, sizeof(small), identity);

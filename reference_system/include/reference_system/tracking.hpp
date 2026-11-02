@@ -323,13 +323,13 @@ public:
   void write_auxiliary(const std::string & producer, reference_system_telemetry::RecordView record)
   {
     if (mode_ != WriterMode::memory) throw std::logic_error("auxiliary memory record in file mode");
+    (void)producer; // Timing labels are not registered provenance producers.
     std::lock_guard<std::mutex> lock(mutex_);
-    auto & state = producers_[producer];
-    record.sequence = state.next_auxiliary;
+    record.sequence = next_auxiliary_;
     if (memory_writer_->append(record) != reference_system_telemetry::AppendResult::written) {
       throw std::runtime_error("memory telemetry append failed");
     }
-    ++state.next_auxiliary;
+    ++next_auxiliary_;
   }
 
   void shutdown()
@@ -408,7 +408,6 @@ private:
   struct ProducerState
   {
     uint64_t next_record = 0;
-    uint64_t next_auxiliary = 0;
     uint64_t next_callback = 0;
     std::map<uint64_t, uint64_t> active;
   };
@@ -684,6 +683,7 @@ private:
   reference_system_telemetry::MemoryWriter * memory_writer_;
   std::mutex mutex_;
   std::map<std::string, ProducerState> producers_;
+  uint64_t next_auxiliary_ = 0;
   std::deque<QueueEntry> queue_;
   size_t outstanding_entries_ = 0;
   std::condition_variable not_empty_;
