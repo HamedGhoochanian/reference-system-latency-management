@@ -36,6 +36,8 @@ int main(int argc, char ** argv)
     report.timestamp_ns = 201;
     report.through_ns = 200;
     assert(shared.writer().append(report) == AppendResult::written);
+    assert(shared.writer().complete());
+    assert(shared.writer().append(report) == AppendResult::failed);
     return 0;
   }
   assert(initialize(bytes, header_bytes + record_size, identity));

@@ -355,6 +355,7 @@ public:
         record.through_ns = static_cast<uint64_t>(record.timestamp_ns);
         append_memory(producer.second, record);
       }
+      if (!memory_writer_->complete()) throw std::runtime_error("memory telemetry shutdown failed");
       memory_closed_ = true;
       return;
     }

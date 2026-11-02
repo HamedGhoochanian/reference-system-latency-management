@@ -96,6 +96,7 @@ inline void shared_store(uint8_t * bytes, size_t offset, uint64_t value) noexcep
 {__atomic_store_n(reinterpret_cast<uint64_t *>(bytes + offset), value, __ATOMIC_RELEASE);}
 inline uint64_t committed(const uint8_t * bytes) noexcept {return shared_load(bytes, 576);}
 inline uint64_t failure(const uint8_t * bytes) noexcept {return shared_load(bytes, 640);}
+inline uint64_t shutdown_complete(const uint8_t * bytes) noexcept {return shared_load(bytes, 768);}
 
 #ifdef REFERENCE_SYSTEM_TELEMETRY_TEST_HOOK
 // Only built into the standalone harness, never into workload processes.
@@ -143,6 +144,15 @@ public:
 
   bool valid() const noexcept {return valid_;}
 
+  // Publish closure only after callback drain and final delivery publication.
+  bool complete() noexcept
+  {
+    std::lock_guard<std::mutex> guard(lock_);
+    if (!valid_ || failure(bytes_) || shutdown_complete(bytes_)) return false;
+    shared_store(bytes_, 768, 1);
+    return true;
+  }
+
   void fail(uint64_t code) noexcept
   {
     std::lock_guard<std::mutex> guard(lock_);
@@ -152,7 +162,7 @@ public:
   AppendResult append(const RecordView & record) noexcept
   {
     std::lock_guard<std::mutex> guard(lock_);
-    if (!valid_ || failure(bytes_)) return AppendResult::failed;
+    if (!valid_ || failure(bytes_) || shutdown_complete(bytes_)) return AppendResult::failed;
     std::array<uint8_t, max_record_bytes> encoded{};
     size_t used = 32;
     auto reserve = [&](size_t n) -> uint8_t * {
