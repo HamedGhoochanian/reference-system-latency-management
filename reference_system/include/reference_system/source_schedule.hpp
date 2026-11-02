@@ -12,6 +12,7 @@
 #include <string>
 #include <system_error>
 #include <vector>
+#include "reference_system/tracking.hpp"
 
 namespace nodes {
 namespace source_schedule_detail {
@@ -98,6 +99,24 @@ public:
       << ",\"old_period_ns\":" << old_period << ",\"new_period_ns\":" << new_period << "}\n";
     out.flush();
     if (!out) {throw std::runtime_error("source application record failed");}
+  }
+  void record_memory(reference_system_tracking::TrackingWriter & writer,
+    size_t index, const std::string & status, const std::string & source,
+    int64_t old_period, int64_t new_period, int64_t application) const {
+    if (status != "applied" && status != "skipped") {
+      throw std::invalid_argument("invalid source application status");
+    }
+    reference_system_telemetry::RecordView record;
+    record.kind = reference_system_telemetry::Kind::source_application;
+    record.timestamp_ns = application;
+    record.name = phase(index).id;
+    record.aux_name = hash_;
+    record.session = session_;
+    record.status = status == "applied" ? 1 : 0;
+    record.requested_ns = requested(index);
+    record.old_period_ns = old_period;
+    record.new_period_ns = new_period;
+    writer.write_auxiliary(source, record);
   }
   static void check_token(const std::string & token) {
     if (token.empty() || token == "." || token == "..") {throw std::runtime_error("empty source identity");}

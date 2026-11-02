@@ -6,8 +6,16 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <string_view>
+#ifdef __linux__
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 namespace reference_system_telemetry {
 
@@ -133,6 +141,14 @@ public:
     valid_ = true;
   }
 
+  bool valid() const noexcept {return valid_;}
+
+  void fail(uint64_t code) noexcept
+  {
+    std::lock_guard<std::mutex> guard(lock_);
+    if (valid_ && !failure(bytes_)) shared_store(bytes_, 640, code);
+  }
+
   AppendResult append(const RecordView & record) noexcept
   {
     std::lock_guard<std::mutex> guard(lock_);
@@ -225,6 +241,49 @@ private:
   size_t size_;
   bool valid_ = false;
   std::mutex lock_;
+};
+
+class MappedBuffer {
+public:
+  MappedBuffer(const char * path, const Identity & identity)
+  {
+#ifdef __linux__
+    if (!path || !*path) throw std::invalid_argument("memory telemetry buffer path is missing");
+    const int fd = open(path, O_RDWR | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) throw std::runtime_error("cannot open telemetry buffer");
+    struct stat info{};
+    if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode) || info.st_size < static_cast<off_t>(header_bytes)) {
+      close(fd);
+      throw std::runtime_error("invalid telemetry buffer file");
+    }
+    size_ = static_cast<size_t>(info.st_size);
+    void * address = mmap(nullptr, size_, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    close(fd);
+    if (address == MAP_FAILED) throw std::runtime_error("cannot map telemetry buffer");
+    bytes_ = static_cast<uint8_t *>(address);
+    writer_ = std::make_unique<MemoryWriter>(bytes_, size_, identity);
+    if (!writer_->valid()) {
+      writer_.reset(); munmap(bytes_, size_); bytes_ = nullptr;
+      throw std::runtime_error("telemetry buffer header or identity mismatch");
+    }
+#else
+    (void)path; (void)identity;
+    throw std::runtime_error("memory telemetry requires Linux");
+#endif
+  }
+  MappedBuffer(const MappedBuffer &) = delete;
+  MappedBuffer & operator=(const MappedBuffer &) = delete;
+  ~MappedBuffer() {
+    writer_.reset();
+#ifdef __linux__
+    if (bytes_) munmap(bytes_, size_);
+#endif
+  }
+  MemoryWriter & writer() noexcept {return *writer_;}
+private:
+  uint8_t * bytes_ = nullptr;
+  size_t size_ = 0;
+  std::unique_ptr<MemoryWriter> writer_;
 };
 } // namespace reference_system_telemetry
 #endif

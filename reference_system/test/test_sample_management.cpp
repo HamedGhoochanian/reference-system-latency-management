@@ -6,8 +6,53 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
 #include "reference_system/sample_management.hpp"
+
+TEST(SampleManagement, MemoryModeRoutesTimingAndDiagnosticsWithoutStdout)
+{
+  char path[] = "/tmp/opencode/diagnostic-buffer-XXXXXX";
+  const int fd = mkstemp(path);
+  ASSERT_GE(fd, 0);
+  constexpr size_t capacity = reference_system_telemetry::header_bytes + 4096;
+  ASSERT_EQ(0, ftruncate(fd, capacity));
+  auto * mapped = static_cast<uint8_t *>(mmap(nullptr, capacity,
+      PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
+  ASSERT_NE(mapped, MAP_FAILED);
+  ASSERT_TRUE(reference_system_telemetry::initialize(mapped, capacity,
+      {"run", "Node", "boot", "instance"}));
+  ASSERT_EQ(0, close(fd));
+  setenv("REFERENCE_SYSTEM_TELEMETRY_TRANSPORT", "memory", 1);
+  setenv("REFERENCE_SYSTEM_TELEMETRY_BUFFER_PATH", path, 1);
+  setenv("REFERENCE_SYSTEM_TELEMETRY_PRODUCER", "Node", 1);
+  setenv("REFERENCE_SYSTEM_RUN_ID", "run", 1);
+  setenv("REFERENCE_SYSTEM_BOOT_ID", "boot", 1);
+  setenv("REFERENCE_SYSTEM_INSTANCE_ID", "instance", 1);
+  testing::internal::CaptureStdout();
+  print_execution_time("Sensor", "Node", 4);
+  ASSERT_TRUE(emit_structured_source_record("Node", 3, 100));
+  ASSERT_TRUE(emit_structured_chain_record("chain", "Node", 3, 100,
+      "Node", 4, 150, 50, {"Node"}, {{"Node", 3, 100}}, "completed", 0));
+  EXPECT_TRUE(testing::internal::GetCapturedStdout().empty());
+  EXPECT_EQ(3U, reference_system_telemetry::shared_load(mapped, 704));
+  std::vector<std::string> too_many;
+  for (size_t i = 0; i < 65; ++i) too_many.push_back("Node" + std::to_string(i));
+  EXPECT_THROW(emit_structured_chain_record("chain", "Node", 3, 100,
+      "Node", 4, 150, 50, too_many, {{"Node", 3, 100}}, "completed", 0),
+    std::runtime_error);
+  EXPECT_EQ(2U, reference_system_telemetry::failure(mapped));
+  ASSERT_EQ(0, munmap(mapped, capacity));
+  ASSERT_EQ(0, unlink(path));
+  unsetenv("REFERENCE_SYSTEM_TELEMETRY_TRANSPORT");
+  unsetenv("REFERENCE_SYSTEM_TELEMETRY_BUFFER_PATH");
+  unsetenv("REFERENCE_SYSTEM_TELEMETRY_PRODUCER");
+  unsetenv("REFERENCE_SYSTEM_RUN_ID");
+  unsetenv("REFERENCE_SYSTEM_BOOT_ID");
+  unsetenv("REFERENCE_SYSTEM_INSTANCE_ID");
+}
 
 TEST(SampleManagement, RejectsBackwardTimestamps)
 {

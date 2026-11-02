@@ -32,6 +32,12 @@ if(${BUILD_TESTING})
   add_executable(test_source_schedule test/test_source_schedule.cpp)
   target_link_libraries(test_source_schedule ${PROJECT_NAME})
   add_test(NAME test_source_schedule COMMAND test_source_schedule)
+  add_executable(test_telemetry_buffer test/telemetry_buffer_harness.cpp)
+  target_link_libraries(test_telemetry_buffer ${PROJECT_NAME})
+  add_test(NAME test_telemetry_buffer COMMAND test_telemetry_buffer)
+  add_executable(test_tracking test/tracking_harness.cpp)
+  target_link_libraries(test_tracking ${PROJECT_NAME})
+  add_test(NAME test_tracking COMMAND test_tracking)
 endif()
 
 # Install

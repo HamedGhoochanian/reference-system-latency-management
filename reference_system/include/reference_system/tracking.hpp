@@ -27,6 +27,7 @@
 #include <unistd.h>
 
 #include "reference_system/stdout_mutex.hpp"
+#include "reference_system/telemetry_buffer.hpp"
 
 namespace reference_system_tracking
 {
@@ -73,7 +74,8 @@ inline std::string with_identity(
 enum class WriterMode
 {
   synchronous,
-  asynchronous
+  asynchronous,
+  memory
 };
 
 inline WriterMode parse_writer_mode(const std::string & value)
@@ -86,6 +88,11 @@ inline WriterMode parse_writer_mode(const std::string & value)
 
 inline WriterMode writer_mode_from_environment()
 {
+  const char * transport = std::getenv("REFERENCE_SYSTEM_TELEMETRY_TRANSPORT");
+  if (transport && std::string(transport) == "memory") return WriterMode::memory;
+  if (transport && std::string(transport) != "file") {
+    throw std::invalid_argument("REFERENCE_SYSTEM_TELEMETRY_TRANSPORT must be 'file' or 'memory'");
+  }
   const char * value = std::getenv("REFERENCE_SYSTEM_TRACKING_WRITER");
   return parse_writer_mode(value == nullptr ? "sync" : value);
 }
@@ -141,11 +148,15 @@ public:
 
   TrackingWriter(std::string boot_id, std::string instance_id, Write write,
     Clock clock = monotonic_now_ns, WriterMode mode = WriterMode::synchronous,
-    size_t queue_capacity = kDefaultQueueCapacity)
+    size_t queue_capacity = kDefaultQueueCapacity,
+    reference_system_telemetry::MemoryWriter * memory_writer = nullptr)
   : boot_id_(std::move(boot_id)), instance_id_(std::move(instance_id)),
     write_(std::move(write)), clock_(std::move(clock)), mode_(mode),
-    queue_capacity_(queue_capacity)
+    queue_capacity_(queue_capacity), memory_writer_(memory_writer)
   {
+    if (mode_ == WriterMode::memory && !memory_writer_) {
+      throw std::invalid_argument("memory tracking writer needs mapped buffer");
+    }
     if (mode_ == WriterMode::asynchronous) {
       if (queue_capacity_ == 0) {throw std::invalid_argument("tracking queue capacity must be positive");}
       consumer_ = std::thread([this] {consume();});
@@ -165,6 +176,9 @@ public:
   Callback begin_callback(const std::string & producer)
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (mode_ == WriterMode::memory && stopping_) {
+      throw std::runtime_error("memory telemetry writer is shutting down");
+    }
     auto & state = producers_[producer];
     const uint64_t token = ++state.next_callback;
     const auto active = state.active.emplace(token, 0).first;
@@ -180,6 +194,9 @@ public:
   Callback begin_callback(const std::string & producer, uint64_t entry_ns)
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (mode_ == WriterMode::memory && stopping_) {
+      throw std::runtime_error("memory telemetry writer is shutting down");
+    }
     auto & state = producers_[producer];
     const uint64_t token = ++state.next_callback;
     const auto active = state.active.emplace(token, 0).first;
@@ -193,6 +210,9 @@ public:
   void write_event(const std::string & producer, uint64_t timestamp_ns, const std::string & event)
   {
     (void)timestamp_ns;
+    if (mode_ == WriterMode::memory) {
+      throw std::logic_error("raw JSON events are not accepted by the memory tracking writer");
+    }
     if (mode_ == WriterMode::asynchronous) {
       throw std::logic_error("raw JSON events are not accepted by the asynchronous tracking writer");
     }
@@ -205,6 +225,15 @@ public:
   void write_source(
     const std::string & producer, uint32_t sequence, uint32_t kind, uint64_t timestamp_ns)
   {
+    if (mode_ == WriterMode::memory) {
+      reference_system_telemetry::RecordView record;
+      record.kind = reference_system_telemetry::Kind::source;
+      record.message_sequence = sequence;
+      record.source_kind = kind;
+      record.timestamp_ns = static_cast<int64_t>(timestamp_ns);
+      write_memory(producer, record);
+      return;
+    }
     write_typed(SourceEvent{producer, sequence, kind, timestamp_ns});
   }
 
@@ -213,6 +242,10 @@ public:
     const std::vector<std::pair<uint32_t, TrackingMessage>> & inputs,
     const TrackingSource & source, bool timer)
   {
+    if (mode_ == WriterMode::memory) {
+      write_memory_link(producer, sequence, channel, timestamp_ns, inputs, source, timer);
+      return;
+    }
     write_typed(LinkEvent{producer, sequence, channel, timestamp_ns, inputs, source, timer});
   }
 
@@ -222,6 +255,10 @@ public:
     const std::vector<std::pair<uint32_t, Message>> & inputs,
     const Source & source, bool timer)
   {
+    if (mode_ == WriterMode::memory) {
+      write_memory_link(producer, sequence, channel, timestamp_ns, inputs, source, timer);
+      return;
+    }
     std::vector<std::pair<uint32_t, TrackingMessage>> copied_inputs;
     copied_inputs.reserve(inputs.size());
     for (const auto & input : inputs) {
@@ -238,6 +275,10 @@ public:
     const std::string & producer, uint32_t sequence, uint64_t timestamp_ns,
     const TrackingMessage & input, const TrackingSource & source)
   {
+    if (mode_ == WriterMode::memory) {
+      write_memory_sink(producer, sequence, timestamp_ns, input, source);
+      return;
+    }
     write_typed(SinkEvent{producer, sequence, timestamp_ns, input, source});
   }
 
@@ -246,6 +287,10 @@ public:
     const std::string & producer, uint32_t sequence, uint64_t timestamp_ns,
     const Message & input, const Source & source)
   {
+    if (mode_ == WriterMode::memory) {
+      write_memory_sink(producer, sequence, timestamp_ns, input, source);
+      return;
+    }
     const TrackingMessage copied_input{input.name, input.sequence, input.channel};
     const TrackingSource copied_source{source.kind, source.sequence, source.timestamp_ns};
     write_typed(SinkEvent{producer, sequence, timestamp_ns, copied_input, copied_source});
@@ -253,6 +298,17 @@ public:
 
   void report_delivery(const std::string & producer, uint64_t now_ns)
   {
+    if (mode_ == WriterMode::memory) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (stopping_) throw std::runtime_error("memory telemetry writer is shutting down");
+      auto & state = producers_[producer];
+      reference_system_telemetry::RecordView record;
+      record.kind = reference_system_telemetry::Kind::delivery;
+      record.timestamp_ns = static_cast<int64_t>(now_ns);
+      record.through_ns = guard_limited_watermark(state, now_ns);
+      append_memory(state, record);
+      return;
+    }
     if (mode_ == WriterMode::asynchronous) {
       enqueue_delivery(producer, now_ns);
       return;
@@ -264,8 +320,44 @@ public:
     write_(delivery_json(producer, state.next_record++, through_ns));
   }
 
+  void write_auxiliary(const std::string & producer, reference_system_telemetry::RecordView record)
+  {
+    if (mode_ != WriterMode::memory) throw std::logic_error("auxiliary memory record in file mode");
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto & state = producers_[producer];
+    record.sequence = state.next_auxiliary;
+    if (memory_writer_->append(record) != reference_system_telemetry::AppendResult::written) {
+      throw std::runtime_error("memory telemetry append failed");
+    }
+    ++state.next_auxiliary;
+  }
+
   void shutdown()
   {
+    if (mode_ == WriterMode::memory) {
+      std::unique_lock<std::mutex> lock(mutex_);
+      if (memory_closed_) return;
+      stopping_ = true;
+      const bool drained = callbacks_idle_.wait_for(lock, std::chrono::seconds(5), [this] {
+          for (const auto & producer : producers_) {
+            if (!producer.second.active.empty()) return false;
+          }
+          return true;
+        });
+      if (!drained) {
+        memory_writer_->fail(3);
+        throw std::runtime_error("memory telemetry callbacks did not drain");
+      }
+      for (auto & producer : producers_) {
+        reference_system_telemetry::RecordView record;
+        record.kind = reference_system_telemetry::Kind::delivery;
+        record.timestamp_ns = static_cast<int64_t>(monotonic_now_ns());
+        record.through_ns = static_cast<uint64_t>(record.timestamp_ns);
+        append_memory(producer.second, record);
+      }
+      memory_closed_ = true;
+      return;
+    }
     if (mode_ != WriterMode::asynchronous) {return;}
     std::lock_guard<std::mutex> shutdown_lock(shutdown_mutex_);
     {
@@ -315,9 +407,67 @@ private:
   struct ProducerState
   {
     uint64_t next_record = 0;
+    uint64_t next_auxiliary = 0;
     uint64_t next_callback = 0;
     std::map<uint64_t, uint64_t> active;
   };
+
+  void write_memory(const std::string & producer, reference_system_telemetry::RecordView record)
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    append_memory(producers_[producer], record);
+  }
+
+  void append_memory(ProducerState & state, reference_system_telemetry::RecordView & record)
+  {
+    record.sequence = state.next_record;
+    const auto result = memory_writer_->append(record);
+    if (result != reference_system_telemetry::AppendResult::written) {
+      throw std::runtime_error("memory telemetry append failed");
+    }
+    ++state.next_record;
+  }
+
+  template<typename Message, typename Source>
+  void write_memory_link(
+    const std::string & producer, uint32_t sequence, uint32_t channel, uint64_t timestamp_ns,
+    const std::vector<std::pair<uint32_t, Message>> & inputs, const Source & source, bool timer)
+  {
+    std::array<reference_system_telemetry::InputView, 64> views{};
+    for (size_t i = 0; i < std::min(inputs.size(), views.size()); ++i) {
+      views[i] = {inputs[i].first, inputs[i].second.name,
+        inputs[i].second.sequence, inputs[i].second.channel};
+    }
+    reference_system_telemetry::RecordView record;
+    record.kind = reference_system_telemetry::Kind::link;
+    record.name = producer;
+    record.message_sequence = sequence;
+    record.channel = channel;
+    record.timestamp_ns = static_cast<int64_t>(timestamp_ns);
+    record.source_kind = source.kind;
+    record.source_sequence = source.sequence;
+    record.source_timestamp_ns = source.timestamp_ns;
+    record.timer = timer;
+    record.inputs = views.data();
+    record.input_count = inputs.size();
+    write_memory(producer, record);
+  }
+
+  template<typename Message, typename Source>
+  void write_memory_sink(
+    const std::string & producer, uint32_t sequence, uint64_t timestamp_ns,
+    const Message & input, const Source & source)
+  {
+    reference_system_telemetry::RecordView record;
+    record.kind = reference_system_telemetry::Kind::sink;
+    record.message_sequence = sequence;
+    record.timestamp_ns = static_cast<int64_t>(timestamp_ns);
+    record.source_kind = source.kind;
+    record.source_sequence = source.sequence;
+    record.source_timestamp_ns = source.timestamp_ns;
+    record.input = {0, input.name, input.sequence, input.channel};
+    write_memory(producer, record);
+  }
 
   template<typename Event>
   void write_typed(Event event)
@@ -522,6 +672,7 @@ private:
     std::lock_guard<std::mutex> lock(mutex_);
     const auto found = producers_.find(producer);
     if (found != producers_.end()) {found->second.active.erase(token);}
+    if (mode_ == WriterMode::memory) callbacks_idle_.notify_all();
   }
   std::string boot_id_;
   std::string instance_id_;
@@ -529,21 +680,27 @@ private:
   Clock clock_;
   WriterMode mode_;
   size_t queue_capacity_;
+  reference_system_telemetry::MemoryWriter * memory_writer_;
   std::mutex mutex_;
   std::map<std::string, ProducerState> producers_;
   std::deque<QueueEntry> queue_;
   size_t outstanding_entries_ = 0;
   std::condition_variable not_empty_;
   std::condition_variable not_full_;
+  std::condition_variable callbacks_idle_;
   std::thread consumer_;
   std::mutex shutdown_mutex_;
   bool stopping_ = false;
+  bool memory_closed_ = false;
   bool failed_ = false;
   std::string failure_message_;
 };
 
 inline bool enabled()
 {
+  if (const char * transport = std::getenv("REFERENCE_SYSTEM_TELEMETRY_TRANSPORT")) {
+    if (std::string(transport) == "memory") return true;
+  }
   const char * value = std::getenv("REFERENCE_SYSTEM_TRACKING");
   return value != nullptr && (std::string(value) == "1" || std::string(value) == "true");
 }
@@ -573,7 +730,16 @@ class Runtime
 {
 public:
   explicit Runtime(WriterMode mode = writer_mode_from_environment())
-  : writer_(read_boot_id(), process_instance_id(), [mode](const std::string & record) {
+  : boot_id_(read_boot_id()), instance_id_(process_instance_id()),
+    mapping_(mode == WriterMode::memory ?
+      std::make_unique<reference_system_telemetry::MappedBuffer>(
+        std::getenv("REFERENCE_SYSTEM_TELEMETRY_BUFFER_PATH"),
+        reference_system_telemetry::Identity{
+          std::getenv("REFERENCE_SYSTEM_RUN_ID") ? std::getenv("REFERENCE_SYSTEM_RUN_ID") : "",
+          std::getenv("REFERENCE_SYSTEM_TELEMETRY_PRODUCER") ?
+          std::getenv("REFERENCE_SYSTEM_TELEMETRY_PRODUCER") : "",
+          boot_id_, instance_id_}) : nullptr),
+    writer_(boot_id_, instance_id_, [mode](const std::string & record) {
       if (mode == WriterMode::synchronous) {
         reference_system_write_stdout_line(record);
         return;
@@ -581,7 +747,8 @@ public:
       std::lock_guard<std::mutex> lock(reference_system_cout_mutex());
       std::cout << record << std::endl;
       if (!std::cout) {throw std::runtime_error("tracking stdout write or flush failed");}
-    }, monotonic_now_ns, mode) {}
+    }, monotonic_now_ns, mode, TrackingWriter::kDefaultQueueCapacity,
+    mapping_ ? &mapping_->writer() : nullptr) {}
   ~Runtime()
   {
     {
@@ -590,10 +757,19 @@ public:
     }
     condition_.notify_all();
     if (reporter_.joinable()) {reporter_.join();}
+    if (writer_.mode() == WriterMode::memory) {
+      try {writer_.shutdown();} catch (const std::exception & error) {
+        std::cerr << "memory telemetry shutdown failed: " << error.what() << std::endl;
+      }
+    }
   }
   TrackingWriter & writer() {return writer_;}
   void register_producer(const std::string & producer)
   {
+    if (mapping_) {
+      const char * expected = std::getenv("REFERENCE_SYSTEM_TELEMETRY_PRODUCER");
+      if (!expected || producer != expected) throw std::runtime_error("memory telemetry producer mismatch");
+    }
     writer_.register_producer(producer);
     std::lock_guard<std::mutex> lock(mutex_);
     if (std::find(producers_.begin(), producers_.end(), producer) == producers_.end()) {
@@ -632,6 +808,8 @@ private:
     std::lock_guard<std::mutex> lock(mutex_);
     return producers_;
   }
+  std::string boot_id_, instance_id_;
+  std::unique_ptr<reference_system_telemetry::MappedBuffer> mapping_;
   TrackingWriter writer_;
   std::mutex mutex_;
   std::condition_variable condition_;

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Focused transport tests run without ROS, Docker, or workload launches.
 #include "reference_system/source_schedule.hpp"
+#include "reference_system/tracking.hpp"
 #ifdef NDEBUG
 #undef NDEBUG // Keep transport assertions active in Release container test builds.
 #endif
@@ -86,6 +87,19 @@ void test_three_phase_regression(const fs::path & dir)
   missed.record(record, 1, "skipped", "Source", "boot", "instance", 100, 100, 7500);
   assert(record.str().find("\"requested_ns\":6000,\"applied_ns\":7500") != std::string::npos);
   assert(record.str().find("\"status\":\"skipped\"") != std::string::npos);
+  alignas(64) uint8_t buffer[reference_system_telemetry::header_bytes + 1024]{};
+  reference_system_telemetry::Identity id{"run", "Source", "boot", "instance"};
+  assert(reference_system_telemetry::initialize(buffer, sizeof(buffer), id));
+  reference_system_telemetry::MemoryWriter memory(buffer, sizeof(buffer), id);
+  reference_system_tracking::TrackingWriter tracking("boot", "instance", [](const std::string &) {
+      assert(false && "memory source receipt wrote a stream");
+    }, reference_system_tracking::monotonic_now_ns,
+    reference_system_tracking::WriterMode::memory,
+    reference_system_tracking::TrackingWriter::kDefaultQueueCapacity, &memory);
+  missed.record_memory(tracking, 1, "skipped", "Source", 100, 100, 7500);
+  assert(reference_system_telemetry::committed(buffer) > 0);
+  assert(buffer[reference_system_telemetry::header_bytes + 4] ==
+    static_cast<uint8_t>(reference_system_telemetry::Kind::source_application));
 
   write(start, "LAME_SOURCE_START_V1 stale boot hash 5000\n");
   nodes::SourceSchedule stale(prepared, "Source", "boot", "instance", 100);

@@ -49,10 +49,13 @@ public:
       instance_ = instance;
       schedule_ = std::make_unique<nodes::SourceSchedule>(settings.source_schedule_file,
           this->get_name(), boot_, instance_, settings.cycle_time.count());
-      const auto output = std::string("/artifacts/raw/") + this->get_name() + ".source-applications.jsonl";
-      if (std::filesystem::exists(output)) {throw std::runtime_error("source application evidence already exists");}
-      applications_.open(output);
-      if (!applications_) {throw std::runtime_error("cannot open source application file");}
+       if (reference_system_tracking::writer_mode_from_environment() !=
+         reference_system_tracking::WriterMode::memory) {
+         const auto output = std::string("/artifacts/raw/") + this->get_name() + ".source-applications.jsonl";
+         if (std::filesystem::exists(output)) {throw std::runtime_error("source application evidence already exists");}
+         applications_.open(output);
+         if (!applications_) {throw std::runtime_error("cannot open source application file");}
+       }
     }
     publisher_ = this->create_publisher<message_t>(settings.topic_name, 1);
     timer_ = this->create_wall_timer(
@@ -99,8 +102,7 @@ private:
       throw std::runtime_error("cannot read source timer period");
     }
     for (size_t i=0; i+1<due.size(); ++i) {
-      schedule_->record(applications_, due[i], "skipped", this->get_name(), boot_, instance_,
-        current, current, static_cast<int64_t>(provenance_now_ns()));
+      record_application(due[i], "skipped", current, current);
     }
     const auto index = due.back();
     int64_t old_period = 0;
@@ -109,9 +111,22 @@ private:
       throw std::runtime_error("source timer period exchange failed");
     }
     timer_->reset(); // Serialized immediately after exchange, in the existing callback.
-    schedule_->record(applications_, index, "applied", this->get_name(), boot_, instance_,
-      old_period, schedule_->phase(index).period, static_cast<int64_t>(provenance_now_ns()));
+    record_application(index, "applied", old_period, schedule_->phase(index).period);
     schedule_->applied(index);
+  }
+
+  void record_application(size_t index, const std::string & status,
+    int64_t old_period, int64_t new_period)
+  {
+    const auto when = static_cast<int64_t>(provenance_now_ns());
+    if (reference_system_tracking::writer_mode_from_environment() ==
+      reference_system_tracking::WriterMode::memory) {
+      schedule_->record_memory(reference_system_tracking::runtime().writer(), index,
+        status, this->get_name(), old_period, new_period, when);
+    } else {
+      schedule_->record(applications_, index, status, this->get_name(), boot_, instance_,
+        old_period, new_period, when);
+    }
   }
 
   std::unique_ptr<nodes::SourceSchedule> schedule_;

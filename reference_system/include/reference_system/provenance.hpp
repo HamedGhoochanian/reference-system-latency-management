@@ -129,7 +129,7 @@ inline void emit_provenance_source(
 {
   if (!is_structured_output_enabled()) return;
   auto * writer = provenance_tracking_writer_if_enabled();
-  if (writer != nullptr && writer->mode() == reference_system_tracking::WriterMode::asynchronous) {
+  if (writer != nullptr && writer->mode() != reference_system_tracking::WriterMode::synchronous) {
     writer->write_source(node, sequence, kind, timestamp_ns);
     return;
   }
@@ -147,7 +147,7 @@ inline void emit_provenance_link(
 {
   if (!is_structured_output_enabled()) return;
   auto * writer = provenance_tracking_writer_if_enabled();
-  if (writer != nullptr && writer->mode() == reference_system_tracking::WriterMode::asynchronous) {
+  if (writer != nullptr && writer->mode() != reference_system_tracking::WriterMode::synchronous) {
     writer->write_link(node, sequence, channel, timestamp_ns, inputs, source, timer);
     return;
   }
@@ -174,7 +174,7 @@ inline void emit_provenance_sink(
 {
   if (!is_structured_output_enabled()) return;
   auto * writer = provenance_tracking_writer_if_enabled();
-  if (writer != nullptr && writer->mode() == reference_system_tracking::WriterMode::asynchronous) {
+  if (writer != nullptr && writer->mode() != reference_system_tracking::WriterMode::synchronous) {
     writer->write_sink(node, sequence, timestamp_ns, input, source);
     return;
   }
