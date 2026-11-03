@@ -30,6 +30,7 @@
 
 #include "reference_system/msg_types.hpp"
 #include "reference_system/stdout_mutex.hpp"
+#include "reference_system/tracking.hpp"
 
 template<typename DurationT>
 void print_execution_time(
@@ -37,6 +38,17 @@ void print_execution_time(
   const std::string & node_name,
   const DurationT duration)
 {
+  if (reference_system_tracking::writer_mode_from_environment() ==
+    reference_system_tracking::WriterMode::memory) {
+    reference_system_telemetry::RecordView record;
+    record.kind = reference_system_telemetry::Kind::timing;
+    record.timestamp_ns = static_cast<int64_t>(reference_system_tracking::monotonic_now_ns());
+    record.name = node_type;
+    record.aux_name = node_name;
+    record.value_ns = static_cast<int64_t>(duration) * 1000; // Existing duration is microseconds.
+    reference_system_tracking::runtime().writer().write_auxiliary(node_name, record);
+    return;
+  }
   std::lock_guard<std::mutex> lock(reference_system_cout_mutex());
   std::cout << node_type << " " << node_name << ": " << duration << std::endl;
 }
@@ -428,6 +440,53 @@ inline bool emit_structured_chain_record(
   const std::string & status,
   uint32_t drop_count)
 {
+  if (reference_system_tracking::writer_mode_from_environment() ==
+    reference_system_tracking::WriterMode::memory) {
+    const source_identity_t reference{source_node, source_sequence, source_timestamp_ns};
+    const auto roots = normalized_source_roots(contributing_source_roots, reference);
+    std::vector<std::string> unique_lineage;
+    for (const auto & name : lineage) {
+      if (std::find(unique_lineage.begin(), unique_lineage.end(), name) == unique_lineage.end()) {
+        unique_lineage.push_back(name);
+      }
+    }
+    if (roots.size() > 64 || unique_lineage.size() > 64) {
+      ++structured_record_error_count();
+      reference_system_telemetry::RecordView invalid;
+      invalid.kind = reference_system_telemetry::Kind::diagnostic;
+      invalid.root_count = roots.size();
+      invalid.lineage_count = unique_lineage.size();
+      reference_system_tracking::runtime().writer().write_auxiliary(sink_node, invalid);
+      throw std::runtime_error("structured diagnostic exceeds memory telemetry limits");
+    }
+    std::array<reference_system_telemetry::RootView, 64> root_views{};
+    std::array<std::string_view, 64> node_views{};
+    for (size_t i = 0; i < roots.size(); ++i) {
+      root_views[i] = {roots[i].node_name, roots[i].sequence_number, roots[i].timestamp};
+    }
+    for (size_t i = 0; i < unique_lineage.size(); ++i) node_views[i] = unique_lineage[i];
+    reference_system_telemetry::RecordView record;
+    record.kind = reference_system_telemetry::Kind::diagnostic;
+    record.timestamp_ns = static_cast<int64_t>(sink_timestamp_ns);
+    record.name = "completion";
+    record.chain_id = chain_id;
+    record.aux_name = source_node;
+    record.sink_name = sink_node;
+    record.source_sequence = source_sequence;
+    record.source_timestamp_ns = source_timestamp_ns;
+    record.message_sequence = sink_sequence;
+    record.value_ns = static_cast<int64_t>(latency_ns);
+    record.status = status == "violated" ? 2 : 1;
+    record.drop_count = drop_count;
+    record.instrumentation_errors = structured_record_error_count().load();
+    record.metadata_overflows = metadata_overflow_count().load();
+    record.roots = root_views.data();
+    record.root_count = roots.size();
+    record.lineage = node_views.data();
+    record.lineage_count = unique_lineage.size();
+    reference_system_tracking::runtime().writer().write_auxiliary(sink_node, record);
+    return true;
+  }
   return write_structured_record(make_structured_chain_record(
       chain_id, source_node, source_sequence, source_timestamp_ns,
       sink_node, sink_sequence, sink_timestamp_ns, latency_ns,
@@ -450,6 +509,20 @@ inline std::string make_structured_source_record(
 inline bool emit_structured_source_record(
   const std::string & source_node, uint32_t source_sequence, uint64_t source_timestamp_ns)
 {
+  if (reference_system_tracking::writer_mode_from_environment() ==
+    reference_system_tracking::WriterMode::memory) {
+    reference_system_telemetry::RecordView record;
+    record.kind = reference_system_telemetry::Kind::diagnostic;
+    record.name = "source";
+    record.aux_name = source_node;
+    record.timestamp_ns = static_cast<int64_t>(source_timestamp_ns);
+    record.source_sequence = source_sequence;
+    record.source_timestamp_ns = source_timestamp_ns;
+    record.instrumentation_errors = structured_record_error_count().load();
+    record.metadata_overflows = metadata_overflow_count().load();
+    reference_system_tracking::runtime().writer().write_auxiliary(source_node, record);
+    return true;
+  }
   return write_structured_record(
     make_structured_source_record(source_node, source_sequence, source_timestamp_ns));
 }

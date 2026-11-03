@@ -5,8 +5,12 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #include "reference_system/stdout_mutex.hpp"
+#include "reference_system/telemetry_buffer.hpp"
 #include "reference_system/tracking.hpp"
 
 int main()
@@ -89,5 +93,175 @@ int main()
   }
   assert(delivery_lines == 2000);
   assert(log_lines == 2000);
+
+  alignas(64) uint8_t memory[reference_system_telemetry::header_bytes + 4096]{};
+  reference_system_telemetry::Identity identity{"run", "Node", "boot-test", "instance-memory"};
+  assert(reference_system_telemetry::initialize(memory, sizeof(memory), identity));
+  reference_system_telemetry::MemoryWriter buffer(memory, sizeof(memory), identity);
+  size_t formatted_writes = 0;
+  reference_system_tracking::TrackingWriter memory_writer(
+    "boot-test", "instance-memory", [&formatted_writes](const std::string &) {++formatted_writes;},
+    [] {return uint64_t(200);}, reference_system_tracking::WriterMode::memory,
+    reference_system_tracking::TrackingWriter::kDefaultQueueCapacity, &buffer);
+  memory_writer.register_producer("Node");
+  {
+    auto active = memory_writer.begin_callback("Node", 100);
+    memory_writer.report_delivery("Node", 200);
+    memory_writer.write_source("Node", 3, 1, 100);
+  }
+  memory_writer.report_delivery("Node", 300);
+  std::vector<std::pair<uint32_t, reference_system_tracking::TrackingMessage>> inputs{
+    {0, {"SensorA", 3, 1}}, {1, {"SensorB", 4, 2}}};
+  memory_writer.write_link("Node", 8, 2, 310, inputs, {1, 3, 100}, false);
+  memory_writer.write_sink("Node", 9, 320, {"InputNode", 7, 3}, {0, 0, 0});
+  reference_system_telemetry::RecordView timing;
+  timing.kind = reference_system_telemetry::Kind::timing;
+  timing.timestamp_ns = 321;
+  timing.name = "Sensor";
+  timing.aux_name = "Node";
+  timing.value_ns = 4000;
+  memory_writer.write_auxiliary("Node", timing);
+  assert(reference_system_telemetry::get64(memory + 704) == 6);
+  assert(formatted_writes == 0);
+  assert(reference_system_telemetry::failure(memory) == 0);
+  assert(reference_system_telemetry::committed(memory) > 120);
+  auto read64 = [](const uint8_t * p) {return reference_system_telemetry::get64(p);};
+  const auto * first = memory + reference_system_telemetry::header_bytes;
+  assert(read64(first + 8) == 0 && read64(first + 32) == 99);
+  assert(read64(first + 40 + 8) == 1 && first[40 + 4] == 1);
+  assert(read64(first + 80 + 8) == 2 && read64(first + 80 + 32) == 300);
+  const auto * link_record = first + 120;
+  assert(link_record[4] == static_cast<uint8_t>(reference_system_telemetry::Kind::link));
+  assert(read64(link_record + 8) == 3);
+  assert(reference_system_telemetry::get32(link_record + 32) == 8);
+  assert(reference_system_telemetry::get32(link_record + 36) == 2);
+  assert(reference_system_telemetry::get32(link_record + 40) == 1);
+  assert(reference_system_telemetry::get32(link_record + 44) == 3);
+  assert(read64(link_record + 48) == 100);
+  const auto * sink_record = link_record + reference_system_telemetry::get32(link_record);
+  assert(sink_record[4] == static_cast<uint8_t>(reference_system_telemetry::Kind::sink));
+  assert(read64(sink_record + 8) == 4);
+  assert(reference_system_telemetry::get32(sink_record + 32) == 9);
+  assert(reference_system_telemetry::get32(sink_record + 36) == 0); // null source
+  std::vector<std::string> file_records;
+  reference_system_tracking::TrackingWriter file_writer("boot-test", "instance-memory",
+    [&file_records](const std::string & text) {file_records.push_back(text);});
+  file_writer.write_link("Node", 8, 2, 310, inputs, {1, 3, 100}, false);
+  file_writer.write_sink("Node", 9, 320, {"InputNode", 7, 3}, {0, 0, 0});
+  assert(file_records.size() == 2);
+  assert(file_records[0].find("\"seq\":8,\"channel\":2") != std::string::npos);
+  assert(file_records[0].find("\"index\":1,\"msg\":{\"name\":\"SensorB\"") != std::string::npos);
+  assert(file_records[1].find("\"source\":null") != std::string::npos);
+  memory_writer.shutdown();
+  assert(reference_system_telemetry::shared_load(memory, 704) == 7);
+  bool stopped_callbacks = false;
+  try {auto guard = memory_writer.begin_callback("Node", 400);} catch (const std::runtime_error &) {
+    stopped_callbacks = true;
+  }
+  assert(stopped_callbacks);
+  // Timing labels may differ from the registered provenance producer. Their
+  // auxiliary sequence is independent, and shutdown publishes only one final
+  // delivery for the registered producer (no new provenance sequence zero).
+  alignas(64) uint8_t aliased[reference_system_telemetry::header_bytes + 4096]{};
+  assert(reference_system_telemetry::initialize(aliased, sizeof(aliased), identity));
+  reference_system_telemetry::MemoryWriter aliased_buffer(aliased, sizeof(aliased), identity);
+  reference_system_tracking::TrackingWriter aliased_writer("boot-test", "instance-memory",
+    [](const std::string &) {assert(false);}, [] {return uint64_t(400);},
+    reference_system_tracking::WriterMode::memory,
+    reference_system_tracking::TrackingWriter::kDefaultQueueCapacity, &aliased_buffer);
+  aliased_writer.register_producer("Node");
+  aliased_writer.write_source("Node", 1, 1, 100);
+  reference_system_telemetry::RecordView alias_timing;
+  alias_timing.kind = reference_system_telemetry::Kind::timing;
+  alias_timing.timestamp_ns = 110;
+  alias_timing.name = "Fusion";
+  alias_timing.aux_name = "Node Trigger";
+  aliased_writer.write_auxiliary("Node", alias_timing);
+  aliased_writer.write_auxiliary("Node Trigger", alias_timing);
+  aliased_writer.write_auxiliary("NodeTimer", alias_timing);
+  aliased_writer.report_delivery("Node", 200);
+  aliased_writer.shutdown();
+  assert(reference_system_telemetry::shared_load(aliased, 704) == 6);
+  const auto * alias_record = aliased + reference_system_telemetry::header_bytes;
+  for (uint64_t seq : {uint64_t(0), uint64_t(0), uint64_t(1), uint64_t(2),
+    uint64_t(1), uint64_t(2)}) {
+    assert(reference_system_telemetry::get64(alias_record + 8) == seq);
+    alias_record += reference_system_telemetry::get32(alias_record);
+  }
+  assert(reference_system_telemetry::shutdown_complete(aliased) == 1);
+  alignas(64) uint8_t small[reference_system_telemetry::header_bytes + 40]{};
+  assert(reference_system_telemetry::initialize(small, sizeof(small), identity));
+  reference_system_telemetry::MemoryWriter small_buffer(small, sizeof(small), identity);
+  reference_system_tracking::TrackingWriter full_writer("boot-test", "instance-memory",
+    [](const std::string &) {assert(false && "memory mode wrote JSON");},
+    [] {return uint64_t(200);}, reference_system_tracking::WriterMode::memory,
+    reference_system_tracking::TrackingWriter::kDefaultQueueCapacity, &small_buffer);
+  full_writer.write_source("Node", 1, 1, 100);
+  bool overflow_reported = false;
+  try {full_writer.report_delivery("Node", 200);} catch (const std::runtime_error &) {overflow_reported = true;}
+  assert(overflow_reported && reference_system_telemetry::failure(small) == 1);
+  assert(reference_system_telemetry::committed(small) == 40);
+  assert(reference_system_telemetry::get64(small + reference_system_telemetry::header_bytes + 8) == 0);
+  bool no_resume = false;
+  try {full_writer.write_source("Node", 2, 1, 201);} catch (const std::runtime_error &) {no_resume = true;}
+  assert(no_resume && reference_system_telemetry::committed(small) == 40);
+  alignas(64) uint8_t oversized[reference_system_telemetry::header_bytes + 4096]{};
+  assert(reference_system_telemetry::initialize(oversized, sizeof(oversized), identity));
+  reference_system_telemetry::MemoryWriter oversized_buffer(oversized, sizeof(oversized), identity);
+  reference_system_tracking::TrackingWriter oversized_writer("boot-test", "instance-memory",
+    [](const std::string &) {assert(false);}, reference_system_tracking::monotonic_now_ns,
+    reference_system_tracking::WriterMode::memory,
+    reference_system_tracking::TrackingWriter::kDefaultQueueCapacity, &oversized_buffer);
+  std::vector<std::pair<uint32_t, reference_system_tracking::TrackingMessage>> many_inputs(65);
+  bool invalid_rejected = false;
+  try {oversized_writer.write_link("Node", 1, 0, 100, many_inputs, {}, false);}
+  catch (const std::runtime_error &) {invalid_rejected = true;}
+  assert(invalid_rejected && reference_system_telemetry::failure(oversized) == 2);
+  alignas(64) uint8_t concurrent[reference_system_telemetry::header_bytes + 4096]{};
+  assert(reference_system_telemetry::initialize(concurrent, sizeof(concurrent), identity));
+  reference_system_telemetry::MemoryWriter concurrent_buffer(concurrent, sizeof(concurrent), identity);
+  reference_system_tracking::TrackingWriter concurrent_writer("boot-test", "instance-memory",
+    [](const std::string &) {assert(false);}, reference_system_tracking::monotonic_now_ns,
+    reference_system_tracking::WriterMode::memory,
+    reference_system_tracking::TrackingWriter::kDefaultQueueCapacity, &concurrent_buffer);
+  std::thread producer_a([&] {
+    for (uint32_t i = 0; i < 40; ++i) concurrent_writer.write_source("Node", i, 1, 100 + i);
+  });
+  std::thread producer_b([&] {
+    for (uint32_t i = 0; i < 40; ++i) concurrent_writer.write_source("Node", i, 1, 100 + i);
+  });
+  producer_a.join();
+  producer_b.join();
+  assert(reference_system_telemetry::committed(concurrent) == 80 * 40);
+  assert(reference_system_telemetry::failure(concurrent) == 0);
+  for (uint64_t i = 0; i < 80; ++i) {
+    assert(reference_system_telemetry::get64(concurrent +
+      reference_system_telemetry::header_bytes + i * 40 + 8) == i);
+  }
+  char path[] = "/tmp/opencode/tracking-buffer-XXXXXX";
+  const int fd = mkstemp(path);
+  assert(fd >= 0);
+  assert(ftruncate(fd, static_cast<off_t>(sizeof(memory))) == 0);
+  auto * mapped = static_cast<uint8_t *>(mmap(nullptr, sizeof(memory),
+      PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
+  assert(mapped != MAP_FAILED);
+  reference_system_telemetry::Identity file_id{"run", "MappedNode", "boot-test", "instance-memory"};
+  assert(reference_system_telemetry::initialize(mapped, sizeof(memory), file_id));
+  assert(!reference_system_telemetry::MemoryWriter(mapped, sizeof(memory), identity).valid());
+  assert(munmap(mapped, sizeof(memory)) == 0);
+  assert(close(fd) == 0);
+  setenv("REFERENCE_SYSTEM_TELEMETRY_TRANSPORT", "memory", 1);
+  setenv("REFERENCE_SYSTEM_TELEMETRY_BUFFER_PATH", path, 1);
+  setenv("REFERENCE_SYSTEM_TELEMETRY_PRODUCER", "MappedNode", 1);
+  setenv("REFERENCE_SYSTEM_RUN_ID", "run", 1);
+  setenv("REFERENCE_SYSTEM_BOOT_ID", "boot-test", 1);
+  setenv("REFERENCE_SYSTEM_INSTANCE_ID", "instance-memory", 1);
+  assert(reference_system_tracking::writer_mode_from_environment() == reference_system_tracking::WriterMode::memory);
+  {
+    reference_system_tracking::Runtime runtime;
+    runtime.writer().register_producer("MappedNode");
+    runtime.writer().write_source("MappedNode", 1, 1, 101);
+  }
+  assert(unlink(path) == 0);
   return 0;
 }
