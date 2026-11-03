@@ -2,6 +2,14 @@
 
 This file is meant to define the Autoware Reference System and all of its nodes, topics and message types.
 
+## Local fork behavior and scope
+
+This README includes inherited benchmark goals. They are not the thesis objective or measured guarantees for this host. The builder and node source define actual behavior. In the thesis checkout, use the [objective](../../../docs/thesis/objective_function.md) for counting and the [experiments index](../../../docs/thesis/experiments_index.md) for evidence.
+
+The graph has six sources. Base periods and processing limits are defined in [timing/default.hpp](include/autoware_reference_system/system/timing/default.hpp). Explicit source periods and schedules can override those base periods. Processing limits count synthetic number-cruncher work, not guaranteed milliseconds. Record actual launch configuration and measurements.
+
+Fusion nodes retain the latest input in each cache. Input 0 triggers processing and publication once both caches exist. Input 1 updates its cache but does not publish a fused output. Publication does not clear the caches. Thus a new trigger can reuse the other input, and a release can remain unfinished without telemetry loss. See [fusion.hpp](../reference_system/include/reference_system/nodes/rclcpp/fusion.hpp) and the [builder](include/autoware_reference_system/autoware_system_builder.hpp) for input wiring.
+
 ![Node graph of reference-system-autoware](../content/img/autoware_reference_system.svg)
 
 To get started and test this system yourself, head down to [the _Quick Start section_](#quick-start) and follow the instructions there.
@@ -79,17 +87,18 @@ For simplicity's sake, every node except for the _command nodes_ only ever publi
         - Message1024kB
         - Message5120kB
 2. [**Sensor Nodes**](../reference_system/include/reference_system/nodes/rclcpp/sensor.hpp)
-    - all _sensor nodes_ have a publishing rate (cycle time) of [**100 milliseconds**](include/reference_system/system/timing/default.hpp#L26)
+    - source periods come from the [timing configuration](include/autoware_reference_system/system/timing/default.hpp) unless the launch overrides them
     - all _sensor_nodes_ publish the same _message type_
-    - total of **5 _sensor nodes_**:
+    - total of **6 _sensor nodes_**:
         - [Front Lidar Driver](include/autoware_reference_system/autoware_system_builder.hpp#L38)
         - [Rear Lidar Driver](include/autoware_reference_system/autoware_system_builder.hpp#L44)
         - [Point Cloud Map](include/autoware_reference_system/autoware_system_builder.hpp#L50)
         - [Visualizer](include/autoware_reference_system/autoware_system_builder.hpp#L56)
-        - [Lanelet2Map](include/autoware_reference_system/autoware_system_builder.hpp#62)
+         - [Lanelet2Map](include/autoware_reference_system/autoware_system_builder.hpp#62)
+         - EuclideanClusterSettings
 3. [**Transform Nodes**](../reference_system/include/reference_system/nodes/rclcpp/transform.hpp)
     - all _transform nodes_ have one subscriber and one publisher
-    - all _transform nodes_ start processing for [**50 milliseconds**](include/autoware_reference_system/system/timing/default.hpp#L28) after a message is received
+    - transform callbacks perform configured [synthetic CPU work](include/autoware_reference_system/system/timing/default.hpp) after a message arrives, not a fixed wall-clock duration
     - publishes message after processing is complete
     - total of **10 _transform nodes_:**
         - [Front Points Transformer](include/autoware_reference_system/autoware_system_builder.hpp#L69)
@@ -103,7 +112,7 @@ For simplicity's sake, every node except for the _command nodes_ only ever publi
         - [Lane Planner](include/autoware_reference_system/autoware_system_builder.hpp#L150)
 4. [**Fusion Nodes**](../reference_system/include/reference_system/nodes/rclcpp/fusion.hpp)
     - all _fusion nodes_ have **two subscribers** and one publisher for this _reference system_
-    - all _fusion nodes_ start processing for [**25 milliseconds**](include/autoware_reference_system/system/timing/default.hpp#L30) after a message is received **from all** subscriptions
+    - input 0 triggers configured synthetic CPU work when both caches exist; input 1 only updates its cache
     - all _fusion nodes_ have a max input time difference between the first input received and last input received before publishing of [**9999** seconds](include/autoware_reference_system/system/timing/benchmark.hpp)
     - publishes message after processing is complete
     - total of **5 _fusion nodes_:**
@@ -115,7 +124,7 @@ For simplicity's sake, every node except for the _command nodes_ only ever publi
 5. [**Cyclic Nodes**](../reference_system/include/reference_system/nodes/rclcpp/cyclic.hpp)
     - for this _reference system_ there is only [**1 _cyclic node_**](include/autoware_reference_system/autoware_system_builder.hpp#L206)
     - this _cyclic node_ has **6 subscribers**and one publisher
-    - this _cyclic node_ starts processing for [**1 millisecond**](include/autoware_reference_system/system/timing/default.hpp#L32) after a message is received **from any** single subscription
+    - this _cyclic node_ uses a timer and cached inputs, with configured [synthetic CPU work](include/autoware_reference_system/system/timing/default.hpp), not a fixed one-millisecond callback
     - publishes message after processing is complete
 6. [**Command Nodes**](../reference_system/include/reference_system/nodes/rclcpp/command.hpp)
     - all _command nodes_ have **1 subscriber** and zero publishers
@@ -137,8 +146,7 @@ This section will go over how to clone, build and run the `autoware_reference_sy
 
 Before running the tests there are a few prerequisites to complete:
 
-- Install python depedencies used during test runs and report generation
-    - `python3 -m pip install psrecord bokeh networkx numpy pandas`
+- Establish the target host's Python dependency constraints before installation. Do not globally install unpinned numpy, pandas, bokeh, networkx, or psrecord over ROS dependencies. In the thesis checkout, use the [host setup note](../../../notes/uni_laptop_setup.md#python-dependency-lock). Use `uv` for Python environments and scripts, and `uvx` for Python tools. An isolated environment must retain compatibility with the ROS packages it imports.
 - Install dependencies using the following command from the `colcon_ws` directory:
     - `rosdep install --from-paths src --ignore-src -y`
 - Install LTTng and `ros2_tracing` [following the instructions in `ros2_tracing`](https://gitlab.com/ros-tracing/ros2_tracing#building)
@@ -269,4 +277,3 @@ dot -Tsvg autoware_reference_system.dot
 ```
 
 _Note:_ you can change the generated image type to any of [the supported type parameters](https://graphviz.org/docs/outputs/) if you would like a different filetype.
-
