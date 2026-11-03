@@ -29,12 +29,12 @@ autoware_reference_system/
 
 ## Conventions
 
-- `RUN_BENCHMARK` controls the full benchmark matrix; without it only lint/default tests are built.
+- `RUN_BENCHMARK` controls benchmark-matrix generation. Read `CMakeLists.txt` for functional targets and other test gates rather than assuming a fixed test roster.
 - `SKIP_TRACING=TRUE` removes callback trace tests but leaves memory/std trace paths active.
 - `ALL_RMWS=ON` tests all discovered RMW implementations; default CMake logic narrows to one implementation.
 - `RUN_TIMES`, `TRACE_TYPES`, and `TEST_TARGETS` live in `CMakeLists.txt`; update all three deliberately when changing benchmark coverage.
 - `ROS_HOME` controls LTTng and memory trace roots; `ROS_LOG_DIR` controls std-log parsing, defaulting into colcon `log/latest_test`.
-- Platform-specific calibration is expected: run `number_cruncher_benchmark`, then update timing config limits for the target hardware.
+- Processing limits require platform-specific calibration. A calibration workload or a change to campaign timing inputs needs explicit scope. Preserve the original limits and evidence.
 
 ## Anti-Patterns
 
