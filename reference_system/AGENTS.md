@@ -28,7 +28,7 @@ reference_system/
 ## Conventions
 
 - This package installs an `INTERFACE` target only; avoid adding `.cpp` implementation files unless the package model changes.
-- Node primitives use QoS depth `1` and loaned messages to model newest-sample behavior.
+- Workload publishers and non-command subscriptions use QoS depth `2`; command subscriptions use depth `20`. Fusion and cyclic nodes consume stored inputs once per publication. Inputs can still be replaced before a trigger; this is not a lossless FIFO pipeline.
 - `#ifdef PICAS` fields set `callback_priority` on timers/subscriptions; non-PICAS builds must remain valid without those members.
 - Output messages should keep sample lineage via `set_sample`, `merge_history_into_sample`, and missed-sample accounting helpers.
 

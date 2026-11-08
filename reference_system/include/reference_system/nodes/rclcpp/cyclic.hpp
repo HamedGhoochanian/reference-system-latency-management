@@ -44,13 +44,13 @@ public:
       subscriptions_.emplace_back(
         subscription_t{
             this->create_subscription<message_t>(
-              input_topic, 1,
+              input_topic, 2,
               [this, input_number](const message_t::SharedPtr msg) {
                 input_callback(input_number, msg);
               }), 0, message_t::SharedPtr()});
       ++input_number;
     }
-    publisher_ = this->create_publisher<message_t>(settings.output_topic, 1);
+    publisher_ = this->create_publisher<message_t>(settings.output_topic, 2);
     timer_ = this->create_wall_timer(
       settings.cycle_time,
       [this] {timer_callback();});

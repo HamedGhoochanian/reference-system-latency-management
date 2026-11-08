@@ -57,7 +57,7 @@ public:
          if (!applications_) {throw std::runtime_error("cannot open source application file");}
        }
     }
-    publisher_ = this->create_publisher<message_t>(settings.topic_name, 1);
+    publisher_ = this->create_publisher<message_t>(settings.topic_name, 2);
     timer_ = this->create_wall_timer(
       settings.cycle_time,
       [this] {timer_callback();});

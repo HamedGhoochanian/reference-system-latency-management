@@ -39,13 +39,13 @@ public:
   {
     register_provenance_producer(this->get_name());
     subscriptions_[0].subscription = this->create_subscription<message_t>(
-      settings.input_0, 1,
+      settings.input_0, 2,
       [this](const message_t::SharedPtr msg) {input_callback(0U, msg);});
 
     subscriptions_[1].subscription = this->create_subscription<message_t>(
-      settings.input_1, 1,
+      settings.input_1, 2,
       [this](const message_t::SharedPtr msg) {input_callback(1U, msg);});
-    publisher_ = this->create_publisher<message_t>(settings.output_topic, 1);
+    publisher_ = this->create_publisher<message_t>(settings.output_topic, 2);
 #ifdef PICAS
     subscriptions_[0].subscription->callback_priority = settings.callback_priority_1;
     subscriptions_[1].subscription->callback_priority = settings.callback_priority_2;
@@ -70,8 +70,8 @@ private:
       volatile auto number_cruncher_result = number_cruncher(number_crunch_limit_ / 4); // 2ms delay
       return;
     }
-    // only process and publish when we can perform an actual fusion, this means
-    // we have received a sample from each subscription
+    // Input 0 triggers fusion only when both inputs have arrived since the
+    // previous publication. Input 1 never initiates fusion.
     if (!subscriptions_[0].cache || !subscriptions_[1].cache) {
       return;
     }
@@ -111,8 +111,8 @@ private:
       "Fusion", std::string(this->get_name()) + " Trigger",
       (c4.tv_sec - c3.tv_sec) * 1000000 + (c4.tv_usec - c3.tv_usec) +
       (c2.tv_sec - c1.tv_sec) * 1000000 + (c2.tv_usec - c1.tv_usec));
-    // subscriptions_[0].cache.reset();
-    // subscriptions_[1].cache.reset();
+    subscriptions_[0].cache.reset();
+    subscriptions_[1].cache.reset();
   }
 
 private:

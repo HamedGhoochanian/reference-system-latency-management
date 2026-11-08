@@ -41,9 +41,9 @@ public:
     for (auto & connection : settings.connections) {
       connections_.emplace_back(
         Connection{
-            this->create_publisher<message_t>(connection.output_topic, 1),
+            this->create_publisher<message_t>(connection.output_topic, 2),
             this->create_subscription<message_t>(
-              connection.input_topic, 1,
+              connection.input_topic, 2,
               [this, id = connections_.size()](const message_t::SharedPtr msg) {
                 input_callback(msg, id);
               }),

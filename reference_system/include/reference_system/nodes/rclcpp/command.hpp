@@ -37,7 +37,7 @@ public:
   {
     register_provenance_producer(this->get_name());
     subscription_ = this->create_subscription<message_t>(
-      settings.input_topic, 10,
+      settings.input_topic, 20,
       [this](const message_t::SharedPtr msg) {input_callback(msg);});
 #ifdef PICAS
     subscription_->callback_priority = settings.callback_priority;
